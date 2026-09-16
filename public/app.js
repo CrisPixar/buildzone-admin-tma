@@ -7,6 +7,7 @@
 
   const $ = (id) => document.getElementById(id);
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  const BUILD = "b5-cachebust";
 
   const state = {
     initData: "",
