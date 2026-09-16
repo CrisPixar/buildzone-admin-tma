@@ -1,5 +1,6 @@
 // BuildZone Admin TMA - frontend
-// Auth flow: read Telegram.WebApp.initData, POST to /api/auth, then call protected APIs
+// Same UX language as building-zone-site: preloader, progress bar, reveal, terminal feed
+// Auth: Telegram.WebApp.initData -> POST /api/auth -> protected APIs
 
 (function () {
   "use strict";
@@ -23,27 +24,44 @@
     } catch (e) { /* noop */ }
   }
 
-  function setNet(on, text) {
+  /* ---------- preloader ---------- */
+  let preTarget = 8;
+  function preSet(pct, label) {
+    preTarget = Math.max(0, Math.min(100, pct));
+    const fill = $("pre-fill");
+    const count = $("pre-count");
+    if (fill) fill.style.width = preTarget + "%";
+    if (count) count.textContent = (label || "auth") + " " + String(Math.round(preTarget)).padStart(3, "0") + " %";
+  }
+  function preDone() {
+    const pre = $("preloader");
+    if (!pre) return;
+    preSet(100, "done");
+    setTimeout(() => pre.classList.add("done"), 250);
+  }
+
+  /* ---------- net badge + user chip ---------- */
+  function setNet(mode, text) {
     const box = $("netStatus");
     if (!box) return;
-    box.classList.toggle("on", !!on);
+    box.classList.toggle("on", mode === "on");
+    box.classList.toggle("bad", mode === "bad");
     const t = $("netStatusText");
-    if (t) t.textContent = text || (on ? "online" : "offline");
+    if (t) t.textContent = text || mode;
   }
 
-  function showTab(name) {
-    document.querySelectorAll("[data-tab]").forEach((el) => {
-      const isBtn = el.classList.contains("tab") || el.classList.contains("btab");
-      if (isBtn) el.classList.toggle("active", el.dataset.tab === name);
-    });
-    document.querySelectorAll(".tabpage").forEach((p) => {
-      p.classList.toggle("active", p.id === "page-" + name);
-    });
-    haptic("tap");
-    if (name === "players") loadPlayers();
-    if (name === "logs") loadLogs();
+  /* ---------- terminal feed ---------- */
+  function term(line, ok) {
+    const box = $("termBody");
+    if (!box) return;
+    const div = document.createElement("div");
+    if (ok) div.className = "ok-line";
+    div.textContent = String(line).slice(0, 180);
+    box.prepend(div);
+    while (box.children.length > 30) box.removeChild(box.lastChild);
   }
 
+  /* ---------- api ---------- */
   async function api(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
     if (state.initData) headers["X-Telegram-Init-Data"] = state.initData;
@@ -59,82 +77,82 @@
     return data;
   }
 
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /* ---------- screens ---------- */
   function showDenied(msg, id) {
-    $("screenLoading").hidden = true;
-    $("app").hidden = true;
-    $("bottomNav").hidden = true;
-    const d = $("screenDenied");
-    d.hidden = false;
-    if (msg) $("deniedText").textContent = msg;
-    $("deniedId").textContent = "id: " + (id || (state.user && state.user.id) || "-");
-    setNet(false, "denied");
-    haptic("err");
+    preDone();
+    setTimeout(() => {
+      $("app").hidden = true;
+      $("bottomNav").hidden = true;
+      $("screenDenied").hidden = false;
+      if (msg) $("deniedText").textContent = msg;
+      $("deniedId").textContent = "id: " + (id || (state.user && state.user.id) || "-");
+      setNet("bad", "denied");
+      haptic("err");
+    }, 500);
   }
 
   function showApp(user) {
-    $("screenLoading").hidden = true;
-    $("screenDenied").hidden = true;
-    $("app").hidden = false;
-    $("bottomNav").hidden = false;
-    setNet(true, "secured");
-    const chip = $("userChip");
-    chip.hidden = false;
-    $("userName").textContent = user.first_name || user.username || ("id " + user.id);
-    $("userId").textContent = "id " + user.id + (user.username ? " - @" + user.username : "");
-    if (user.photo_url) {
-      const img = $("userAvatar");
-      img.src = user.photo_url;
-      img.hidden = false;
-    }
-    loadStats();
-    loadPlayers();
-    loadLogs();
+    preDone();
+    setTimeout(() => {
+      $("screenDenied").hidden = true;
+      $("app").hidden = false;
+      $("bottomNav").hidden = false;
+      setNet("on", "online");
+      const chip = $("userChip");
+      chip.hidden = false;
+      $("userName").textContent = user.first_name || user.username || ("id " + user.id);
+      if (user.photo_url) {
+        const img = $("userAvatar");
+        img.src = user.photo_url;
+        img.hidden = false;
+      }
+      initReveal();
+      loadStats();
+      loadPlayers();
+      loadLogs();
+    }, 500);
   }
 
   async function doAuth() {
     $("screenDenied").hidden = true;
-    $("screenLoading").hidden = false;
-    $("loadingHint").textContent = state.initData
-      ? ("initData len: " + state.initData.length)
-      : "no initData - open inside Telegram";
+    preSet(18, "auth");
 
-    // Demo preview mode: ?demo=1 renders UI without backend auth
     if (state.demo && !state.initData) {
-      setNet(true, "demo");
+      preSet(70, "demo");
       showApp({ id: 0, first_name: "Demo Admin", username: "demo" });
       renderDemoStats();
+      term("demo mode - backend auth skipped", true);
       return;
     }
 
     if (!state.initData) {
-      showDenied("Open this app from your Telegram bot button (no initData found).", "-");
+      showDenied("Открой приложение кнопкой бота в Telegram (initData не найден).", "-");
       return;
     }
     try {
+      preSet(55, "verify");
       const r = await api("/api/auth", {
         method: "POST",
         body: JSON.stringify({ initData: state.initData })
       });
+      preSet(88, "welcome");
       state.user = r.user;
       showApp(r.user);
       haptic("ok");
-      term("auth ok - welcome @" + (r.user.username || r.user.id));
+      term("auth ok - welcome @" + (r.user.username || r.user.id), true);
     } catch (e) {
       const uid = e.data && e.data.user ? e.data.user.id : "-";
       showDenied(e.message || "auth failed", uid);
     }
   }
 
-  function term(line) {
-    const box = $("termBody");
-    if (!box) return;
-    const div = document.createElement("div");
-    div.textContent = String(line).slice(0, 160);
-    const carets = box.querySelectorAll(".ok");
-    if (carets.length) carets[carets.length - 1].before(div);
-    else box.appendChild(div);
-  }
-
+  /* ---------- data ---------- */
   function renderDemoStats() {
     $("stOnline").textContent = "128";
     $("stPlayers").textContent = "1,840";
@@ -162,38 +180,40 @@
 
   async function loadPlayers() {
     const body = $("playersBody");
+    if (!body) return;
     const q = ($("playerSearch").value || "").trim();
     try {
       const r = await api("/api/players?q=" + encodeURIComponent(q));
       const list = r.players || [];
       if (!list.length) {
-        body.innerHTML = '<tr><td colspan="6" class="muted">No players found.</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="td-muted">Игроки не найдены.</td></tr>';
         return;
       }
       body.innerHTML = "";
       list.forEach((p) => {
         const tr = document.createElement("tr");
-        const badge = p.banned
-          ? '<span class="badge banned">banned</span>'
+        const pill = p.banned
+          ? '<span class="pill banned">banned</span>'
           : p.status === "online"
-            ? '<span class="badge online">online</span>'
-            : '<span class="badge offline">offline</span>';
+            ? '<span class="pill online">online</span>'
+            : '<span class="pill offline">offline</span>';
         tr.innerHTML =
-          "<td><b>" + escapeHtml(p.nick) + "</b><div class='small muted mono'>" + p.tgId + "</div></td>" +
-          "<td>" + badge + "</td>" +
+          '<td><span class="nick">' + escapeHtml(p.nick) + "<small>" + p.tgId + "</small></span></td>" +
+          "<td>" + pill + "</td>" +
           "<td>" + p.level + "</td><td>" + p.builds + "</td>" +
-          "<td class='muted'>" + escapeHtml(p.lastSeen) + "</td>";
+          '<td class="td-muted">' + escapeHtml(p.lastSeen) + "</td>";
         const td = document.createElement("td");
         const btn = document.createElement("button");
-        btn.className = "btn xs " + (p.banned ? "primary" : "danger");
-        btn.textContent = p.banned ? "Unban" : "Ban";
+        btn.type = "button";
+        btn.className = "btn btn-mini" + (p.banned ? "" : " danger");
+        btn.textContent = p.banned ? "Разбан" : "Бан";
         btn.onclick = () => toggleBan(p, btn);
         td.appendChild(btn);
         tr.appendChild(td);
         body.appendChild(tr);
       });
     } catch (e) {
-      body.innerHTML = '<tr><td colspan="6" class="muted">Error: ' + escapeHtml(e.message) + "</td></tr>";
+      body.innerHTML = '<tr><td colspan="6" class="td-muted">Ошибка: ' + escapeHtml(e.message) + "</td></tr>";
     }
   }
 
@@ -206,16 +226,17 @@
       Object.assign(p, r.player);
       haptic("ok");
       loadPlayers();
-      term((wasBanned ? "unban ok: " : "ban ok: ") + p.nick);
+      term((wasBanned ? "unban ok: " : "ban ok: ") + p.nick, true);
     } catch (e) {
       haptic("err");
-      alert("Failed: " + e.message);
+      term("ban error: " + e.message);
       btn.disabled = false;
     }
   }
 
   async function loadLogs() {
     const box = $("logsBox");
+    if (!box) return;
     try {
       const r = await api("/api/logs");
       const logs = r.logs || [];
@@ -224,63 +245,106 @@
         const d = document.createElement("div");
         const time = new Date(l.ts).toLocaleString("ru-RU", { hour12: false });
         d.innerHTML = "<b>" + escapeHtml(l.action) + "</b> - " + escapeHtml(l.detail) +
-          "<div class='small muted'>" + escapeHtml(time) + " - by " + escapeHtml(l.actor) + "</div>";
+          '<div class="log-meta">' + escapeHtml(time) + " - by " + escapeHtml(l.actor) + "</div>";
         box.appendChild(d);
       });
-      if (!logs.length) box.innerHTML = '<div class="muted">No logs yet.</div>';
+      if (!logs.length) box.innerHTML = '<div class="td-muted">Пока пусто.</div>';
     } catch (e) {
-      box.innerHTML = '<div class="muted">Error: ' + escapeHtml(e.message) + "</div>";
+      box.innerHTML = '<div class="td-muted">Ошибка: ' + escapeHtml(e.message) + "</div>";
     }
   }
 
-  function escapeHtml(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  /* ---------- site-like chrome: progress, nav, reveal ---------- */
+  function initChrome() {
+    const nav = $("nav");
+    const progress = $("progress");
+    const onScroll = () => {
+      const y = window.scrollY || 0;
+      if (nav) nav.classList.toggle("scrolled", y > 24);
+      if (progress) {
+        const h = document.documentElement.scrollHeight - window.innerHeight;
+        progress.style.transform = "scaleX(" + (h > 0 ? Math.min(1, y / h) : 0) + ")";
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
   }
 
+  function initReveal() {
+    const els = document.querySelectorAll(".reveal");
+    if (!("IntersectionObserver" in window)) {
+      els.forEach((el) => el.classList.add("visible"));
+      return;
+    }
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (en.isIntersecting) {
+          en.target.classList.add("visible");
+          io.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.08 });
+    els.forEach((el) => io.observe(el));
+  }
+
+  async function copyText(text, btn) {
+    try {
+      await navigator.clipboard.writeText(text);
+      term("copied: " + text, true);
+      if (btn) {
+        const old = btn.textContent;
+        btn.textContent = "ok";
+        btn.classList.add("ok");
+        setTimeout(() => { btn.textContent = old; btn.classList.remove("ok"); }, 1200);
+      }
+      haptic("tap");
+    } catch (e) {
+      term("copy failed - select manually");
+    }
+  }
+
+  /* ---------- init ---------- */
   function init() {
     if (tg) {
       try {
         tg.ready();
         tg.expand();
-        if (tg.setHeaderColor) tg.setHeaderColor("#0b0b10");
-        if (tg.setBackgroundColor) tg.setBackgroundColor("#0b0b10");
+        if (tg.setHeaderColor) tg.setHeaderColor("#0D0704");
+        if (tg.setBackgroundColor) tg.setBackgroundColor("#0D0704");
       } catch (e) { /* noop */ }
       state.initData = tg.initData || "";
     }
 
-    document.querySelectorAll("[data-tab]").forEach((el) => {
-      el.addEventListener("click", () => showTab(el.dataset.tab));
+    initChrome();
+    preSet(8, "auth");
+
+    document.querySelectorAll("[data-copy]").forEach((b) => {
+      b.addEventListener("click", () => copyText(b.dataset.copy || "", b));
+    });
+    document.querySelectorAll("[data-qa]").forEach((b) => {
+      b.addEventListener("click", () => {
+        haptic("tap");
+        $("qaResult").textContent = "В очереди: " + b.dataset.qa + " - подключи RCON для реального исполнения.";
+        term("queued: " + b.dataset.qa);
+      });
     });
 
     $("btnRetry").onclick = () => { haptic("tap"); doAuth(); };
-    $("btnRefresh").onclick = () => { haptic("tap"); loadStats(); term("stats refreshed"); };
-    $("btnCopyIp").onclick = async () => {
-      haptic("tap");
-      try { await navigator.clipboard.writeText("play.buildzone.lol:25903"); term("ip copied"); }
-      catch (e) { term("copy failed - select manually"); }
-    };
+    $("btnRefresh").onclick = () => { haptic("tap"); loadStats(); term("stats refreshed", true); };
+    $("btnCopyIp").onclick = (e) => copyText("play.buildzone.lol:25903", e.currentTarget);
+
     let searchT = null;
     $("playerSearch").addEventListener("input", () => {
       clearTimeout(searchT);
       searchT = setTimeout(loadPlayers, 250);
     });
 
-    document.querySelectorAll("[data-qa]").forEach((b) => {
-      b.onclick = () => {
-        haptic("tap");
-        $("qaResult").textContent = "Queued: " + b.dataset.qa + " - wire RCON to execute for real.";
-        term("qa queued: " + b.dataset.qa);
-      };
-    });
-
-    $("btnBan").onclick = async () => {
+    $("btnBan").onclick = () => {
       const t = $("banTarget").value.trim();
       const reason = $("banReason").value.trim() || "no reason";
-      if (!t) { $("banResult").textContent = "Enter nick or ID first."; return; }
+      if (!t) { $("banResult").textContent = "Сначала введи ник или ID."; return; }
       haptic("tap");
-      $("banResult").textContent = "Banned " + t + " (" + $("banDuration").value + ") - reason: " + reason;
+      $("banResult").textContent = "Забанен " + t + " (" + $("banDuration").value + ") - причина: " + reason;
       term("manual ban: " + t);
     };
 
@@ -289,22 +353,27 @@
     $("btnBcPreview").onclick = () => {
       const p = $("bcPreview");
       p.hidden = false;
-      p.textContent = bcText.value.trim() || "(empty)";
+      p.textContent = bcText.value.trim() || "(пусто)";
     };
     $("btnBcSend").onclick = async () => {
       const text = bcText.value.trim();
-      if (!text) { $("bcResult").textContent = "Text is empty."; return; }
+      if (!text) { $("bcResult").textContent = "Текст пустой."; return; }
       try {
         const r = await api("/api/broadcast", { method: "POST", body: JSON.stringify({ text }) });
-        $("bcResult").textContent = "Sent to " + r.sent + " subs (demo count).";
+        $("bcResult").textContent = "Отправлено " + r.sent + " подписчикам (демо-счетчик).";
         haptic("ok");
-        term("broadcast sent");
+        term("broadcast sent", true);
       } catch (e) {
-        $("bcResult").textContent = "Send failed: " + e.message;
+        $("bcResult").textContent = "Ошибка отправки: " + e.message;
         haptic("err");
       }
     };
     $("btnLogs").onclick = () => loadLogs();
+
+    // smooth anchor taps with haptic
+    document.querySelectorAll('a[href^="#"]').forEach((a) => {
+      a.addEventListener("click", () => haptic("tap"));
+    });
 
     doAuth();
   }
