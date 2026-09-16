@@ -7,7 +7,7 @@
 
   const $ = (id) => document.getElementById(id);
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-  const BUILD = "b7-real";
+  const BUILD = "b8-diag";
 
   const state = {
     initData: "",

@@ -95,21 +95,28 @@ function needOwner(req, res, next) {
 }
 
 async function pluginCall(p, opts = {}) {
+  const key = String(GAME_API_KEY || "").trim();
+  if (!GAME_API_URL) return { error: "plugin not configured (set GAME_API_URL)", offline: true };
   try {
     const res = await fetch(GAME_API_URL + p, {
       method: opts.method || "GET",
-      headers: { "Content-Type": "application/json", "X-Auth-Key": GAME_API_KEY },
+      headers: { "Content-Type": "application/json", "X-Auth-Key": key, "User-Agent": "BuildZone-Admin/1.0" },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS)
     });
-    const data = await res.json().catch(() => null);
-    if (res.status === 401) return { error: "bad GAME_API_KEY (plugin said 401)" };
-    if (res.status === 429) return { error: "plugin rate limited, retry later" };
-    if (!res.ok || !data) return { error: "plugin http " + res.status, offline: res.status >= 500 };
-    if (!data.ok) return { error: data.error || "plugin error" };
-    return { data: data.data };
+    const raw = await res.text().catch(() => "");
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch (e) { data = null; }
+    if (res.status === 401) return { error: "bad GAME_API_KEY (plugin said 401)", pluginHttp: 401 };
+    if (res.status === 429) return { error: "plugin rate limited, retry later", pluginHttp: 429 };
+    if (!res.ok || !data) {
+      const snippet = raw ? raw.replace(/\s+/g, " ").slice(0, 160) : "(empty)";
+      return { error: `plugin http ${res.status} - body: ${snippet}`, offline: res.status >= 500, pluginHttp: res.status };
+    }
+    if (!data.ok) return { error: data.error || "plugin error", pluginHttp: res.status };
+    return { data: data.data, pluginHttp: res.status };
   } catch (e) {
-    return { error: "plugin unreachable", offline: true };
+    return { error: "plugin unreachable (" + String((e && e.name) || "fetch") + ")", offline: true };
   }
 }
 const passError = (res, r) => res.status(r.offline ? 502 : 400).json({ ok: false, error: r.error, offline: !!r.offline });
@@ -145,8 +152,17 @@ function mockResult(action, admin, name, reason) {
 
 // ---------- routes ----------
 
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "buildzone-admin-tma-node", mock: MOCK, time: new Date().toISOString() });
+app.get("/api/health", async (req, res) => {
+  const info = { ok: true, service: "buildzone-admin-tma-node", mock: MOCK, time: new Date().toISOString() };
+  if (!MOCK && GAME_API_URL) {
+    const r = await pluginCall("/api/status");
+    info.plugin = r.error
+      ? { ok: false, http: r.pluginHttp || 0, error: String(r.error).slice(0, 140) }
+      : { ok: true, http: r.pluginHttp || 200 };
+  } else {
+    info.plugin = { ok: false, http: 0, error: MOCK ? "mock mode" : "not configured" };
+  }
+  res.json(info);
 });
 
 app.post("/api/auth", (req, res) => {

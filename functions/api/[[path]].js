@@ -71,24 +71,30 @@ async function validateInitData(initData, botToken, maxAgeSec = 86400) {
 
 async function pluginCall(env, path, opts = {}) {
   const base = String(env.GAME_API_URL || "").replace(/\/$/, "");
+  const key = String(env.GAME_API_KEY || "").trim();
   if (!base) return { error: "plugin not configured (set GAME_API_URL)", offline: true };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PLUGIN_TIMEOUT_MS);
   try {
     const res = await fetch(base + path, {
       method: opts.method || "GET",
-      headers: { "Content-Type": "application/json", "X-Auth-Key": env.GAME_API_KEY || "" },
+      headers: { "Content-Type": "application/json", "X-Auth-Key": key, "User-Agent": "BuildZone-Admin/1.0" },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       signal: ctrl.signal
     });
-    const data = await res.json().catch(() => null);
-    if (res.status === 401) return { error: "bad GAME_API_KEY (plugin said 401)" };
-    if (res.status === 429) return { error: "plugin rate limited, retry later" };
-    if (!res.ok || !data) return { error: "plugin http " + res.status, offline: res.status >= 500 };
-    if (!data.ok) return { error: data.error || "plugin error" };
-    return { data: data.data };
+    const raw = await res.text().catch(() => "");
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch (e) { data = null; }
+    if (res.status === 401) return { error: "bad GAME_API_KEY (plugin said 401)", pluginHttp: 401 };
+    if (res.status === 429) return { error: "plugin rate limited, retry later", pluginHttp: 429 };
+    if (!res.ok || !data) {
+      const snippet = raw ? raw.replace(/\s+/g, " ").slice(0, 160) : "(empty)";
+      return { error: `plugin http ${res.status} - body: ${snippet}`, offline: res.status >= 500, pluginHttp: res.status };
+    }
+    if (!data.ok) return { error: data.error || "plugin error", pluginHttp: res.status };
+    return { data: data.data, pluginHttp: res.status };
   } catch (e) {
-    return { error: "plugin unreachable", offline: true };
+    return { error: "plugin unreachable (" + String((e && e.name) || "fetch") + ")", offline: true };
   } finally {
     clearTimeout(timer);
   }
@@ -194,9 +200,18 @@ export async function onRequest(context) {
     body.initData ||
     "";
 
-  // public health
+  // public health + plugin reachability self-test (flags only, no game data, no key)
   if (route === "health" && request.method === "GET") {
-    return json({ ok: true, service: "buildzone-admin-tma-pages", mock: MOCK, time: new Date().toISOString() });
+    const info = { ok: true, service: "buildzone-admin-tma-pages", mock: MOCK, time: new Date().toISOString() };
+    if (!MOCK && String((env && env.GAME_API_URL) || "").trim()) {
+      const r = await pluginCall(env, "/api/status");
+      info.plugin = r.error
+        ? { ok: false, http: r.pluginHttp || 0, error: String(r.error).slice(0, 140) }
+        : { ok: true, http: r.pluginHttp || 200 };
+    } else {
+      info.plugin = { ok: false, http: 0, error: MOCK ? "mock mode" : "not configured" };
+    }
+    return json(info);
   }
 
   // POST /api/auth - transparent Telegram login + role
