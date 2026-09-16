@@ -148,7 +148,11 @@
       term("auth ok - welcome @" + (r.user.username || r.user.id), true);
     } catch (e) {
       const uid = e.data && e.data.user ? e.data.user.id : "-";
-      showDenied(e.message || "auth failed", uid);
+      let msg = e.message || "auth failed";
+      if (e.status === 404 || e.status === 405) {
+        msg = "Backend API missing (http " + e.status + ") - deploy Pages Functions or Node server, then retry.";
+      }
+      showDenied(msg, uid);
     }
   }
 

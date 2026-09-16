@@ -34,6 +34,10 @@
 h1, h2, h3, h4, p, blockquote, figure {
   margin: 0;
 }
+/* guard: author display rules must never override hidden */
+[hidden] {
+  display: none !important;
+}
 ul {
   margin: 0;
   padding: 0;
