@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>BuildZone - Admin Panel</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-cube" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <div class="brand-text">
+        <div class="brand-title">BUILDZONE <span class="brand-sub">// ADMIN</span></div>
+        <div class="brand-tag">season 3 - control center</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="net-status" id="netStatus"><i class="dot"></i><span id="netStatusText">connecting</span></div>
+      <div class="user-chip" id="userChip" hidden>
+        <img id="userAvatar" alt="avatar" hidden>
+        <div class="user-meta"><div id="userName">admin</div><div id="userId" class="user-id">id -</div></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- Loading -->
+  <section id="screenLoading" class="card center">
+    <div class="spinner"></div>
+    <h2>Auth via Telegram</h2>
+    <p class="muted">Validating initData hash on backend...</p>
+    <p class="mono small" id="loadingHint">waiting for Telegram.WebApp</p>
+  </section>
+
+  <!-- Denied -->
+  <section id="screenDenied" class="card center" hidden>
+    <div class="denied-badge">403</div>
+    <h2>Access denied</h2>
+    <p class="muted" id="deniedText">Your Telegram ID is not in the admin list.</p>
+    <div class="denied-box mono" id="deniedId">id: -</div>
+    <p class="small muted">Ask the owner to add your ID to ADMIN_IDS on the server, then reopen the app.</p>
+    <button class="btn ghost" id="btnRetry">Retry auth</button>
+  </section>
+
+  <!-- App -->
+  <div id="app" hidden>
+    <nav class="tabs" id="topTabs">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="players">Players</button>
+      <button class="tab" data-tab="moderation">Moderation</button>
+      <button class="tab" data-tab="broadcast">Broadcast</button>
+      <button class="tab" data-tab="logs">Logs</button>
+    </nav>
+
+    <!-- OVERVIEW -->
+    <section class="tabpage active" id="page-overview">
+      <div class="hero card">
+        <div class="hero-left">
+          <div class="kicker">01 - server pulse</div>
+          <h1>History in every block.</h1>
+          <p class="muted">Live control for the creative space. Minimal latency, full power, premium dark ops.</p>
+          <div class="hero-actions">
+            <button class="btn primary" id="btnRefresh">Refresh stats</button>
+            <button class="btn ghost" id="btnCopyIp">Copy IP: play.buildzone.lol</button>
+          </div>
+        </div>
+        <div class="hero-right">
+          <div class="terminal">
+            <div class="term-head"><span></span><span></span><span></span><em>building-zone - connect.exe</em></div>
+            <div class="term-body mono" id="termBody">
+              <div>player@bedrock:~$ connect Building Zone</div>
+              <div class="ok">awaiting connection <span class="caret"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid stats" id="statsGrid">
+        <div class="card stat"><div class="stat-k">Online now</div><div class="stat-v" id="stOnline">-</div><div class="stat-d up">live</div></div>
+        <div class="card stat"><div class="stat-k">Players total</div><div class="stat-v" id="stPlayers">-</div><div class="stat-d">season 3</div></div>
+        <div class="card stat"><div class="stat-k">Builds on map</div><div class="stat-v" id="stBuilds">-</div><div class="stat-d up">+12 today</div></div>
+        <div class="card stat"><div class="stat-k">Uptime 24/7</div><div class="stat-v" id="stUptime">-</div><div class="stat-d up">stable</div></div>
+        <div class="card stat"><div class="stat-k">Pending reports</div><div class="stat-v warn" id="stReports">-</div><div class="stat-d warn-t">needs review</div></div>
+        <div class="card stat"><div class="stat-k">Joins today</div><div class="stat-v" id="stJoins">-</div><div class="stat-d">growth</div></div>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <div class="card-h"><h3>Quick actions</h3><span class="pill">ops</span></div>
+          <div class="qa-grid">
+            <button class="qa" data-qa="restart">Restart proxy</button>
+            <button class="qa" data-qa="backup">Backup world</button>
+            <button class="qa" data-qa="whitelist">Toggle whitelist</button>
+            <button class="qa" data-qa="event">Start event</button>
+          </div>
+          <p class="small muted" id="qaResult">Pick an action. Demo mode logs locally until real RCON is wired.</p>
+        </div>
+        <div class="card">
+          <div class="card-h"><h3>Server info</h3><span class="pill lime">1.21.50-51</span></div>
+          <ul class="kv">
+            <li><span>Address</span><b class="mono">play.buildzone.lol</b></li>
+            <li><span>Port</span><b class="mono">25903</b></li>
+            <li><span>Full</span><b class="mono small">play.buildzone.lol:25903</b></li>
+            <li><span>Site</span><b>buildzone.lol</b></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLAYERS -->
+    <section class="tabpage" id="page-players">
+      <div class="card">
+        <div class="card-h">
+          <h3>Players</h3>
+          <div class="search"><input id="playerSearch" placeholder="Search nick or Telegram ID..."></div>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="playersTable">
+            <thead><tr><th>Nick</th><th>Status</th><th>Level</th><th>Builds</th><th>Last seen</th><th></th></tr></thead>
+            <tbody id="playersBody"><tr><td colspan="6" class="muted">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODERATION -->
+    <section class="tabpage" id="page-moderation">
+      <div class="grid two">
+        <div class="card">
+          <div class="card-h"><h3>Reports queue</h3><span class="pill warn">4 open</span></div>
+          <div class="report"><div><b>#1042 grief?</b><div class="small muted">Plot 58 - screenshots attached</div></div><div class="row"><button class="btn xs primary">Approve</button><button class="btn xs ghost">Dismiss</button></div></div>
+          <div class="report"><div><b>#1041 spam</b><div class="small muted">Global chat - flood x12</div></div><div class="row"><button class="btn xs primary">Mute 1h</button><button class="btn xs ghost">Dismiss</button></div></div>
+          <div class="report"><div><b>#1040 stolen build</b><div class="small muted">Copy of spawn plaza</div></div><div class="row"><button class="btn xs primary">Rollback</button><button class="btn xs ghost">Dismiss</button></div></div>
+          <div class="report"><div><b>#1039 bad nick</b><div class="small muted">Rename request</div></div><div class="row"><button class="btn xs primary">Rename</button><button class="btn xs ghost">Dismiss</button></div></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h3>Ban hammer</h3><span class="pill">manual</span></div>
+          <label class="field"><span>Nick or ID</span><input id="banTarget" placeholder="e.g. Griefer123"></label>
+          <label class="field"><span>Reason</span><input id="banReason" placeholder="e.g. grief - rollback done"></label>
+          <label class="field"><span>Duration</span>
+            <select id="banDuration"><option>1 hour</option><option>1 day</option><option>7 days</option><option selected>permanent</option></select>
+          </label>
+          <button class="btn danger full" id="btnBan">Ban player</button>
+          <p class="small muted" id="banResult">Demo: action is logged to Logs tab.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- BROADCAST -->
+    <section class="tabpage" id="page-broadcast">
+      <div class="card">
+        <div class="card-h"><h3>Broadcast to community</h3><span class="pill lime">1840 subs</span></div>
+        <label class="field"><span>Message</span><textarea id="bcText" rows="4" maxlength="1000" placeholder="e.g. Season 3 event tonight at 20:00 MSK - spawn plaza. Be there."></textarea></label>
+        <div class="row between">
+          <div class="small muted"><span id="bcCount">0</span>/1000</div>
+          <div class="row"><button class="btn ghost" id="btnBcPreview">Preview</button><button class="btn primary" id="btnBcSend">Send</button></div>
+        </div>
+        <div class="preview mono" id="bcPreview" hidden></div>
+        <p class="small muted" id="bcResult"></p>
+      </div>
+    </section>
+
+    <!-- LOGS -->
+    <section class="tabpage" id="page-logs">
+      <div class="card">
+        <div class="card-h"><h3>Action log</h3><button class="btn xs ghost" id="btnLogs">Reload</button></div>
+        <div class="logs mono" id="logsBox"><div class="muted">Loading...</div></div>
+      </div>
+    </section>
+
+    <footer class="foot muted small">BuildZone Admin TMA - premium dark ops - v1.0.0</footer>
+    <div class="bottom-pad"></div>
+  </div>
+</main>
+
+<nav class="bottomnav" id="bottomNav" hidden>
+  <button class="btab active" data-tab="overview"><i>◈</i><span>Home</span></button>
+  <button class="btab" data-tab="players"><i>◍</i><span>Players</span></button>
+  <button class="btab" data-tab="moderation"><i>⬢</i><span>Mods</span></button>
+  <button class="btab" data-tab="broadcast"><i>✦</i><span>News</span></button>
+  <button class="btab" data-tab="logs"><i>☰</i><span>Logs</span></button>
+</nav>
+
+<script src="./app.js"></script>
+</body>
+</html>

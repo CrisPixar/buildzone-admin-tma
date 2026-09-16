@@ -1,0 +1,21 @@
+{
+  "name": "buildzone-admin-tma",
+  "version": "1.0.0",
+  "description": "Admin panel for game project as Telegram Mini App - dark premium UI in buildzone style",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": ["telegram", "tma", "webapp", "admin", "minecraft", "buildzone"],
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
