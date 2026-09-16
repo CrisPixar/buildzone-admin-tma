@@ -7,7 +7,11 @@
 
   const $ = (id) => document.getElementById(id);
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-  const BUILD = "b8-diag";
+  const BUILD = "b9-apibase";
+  // API base: empty = same origin (Pages Functions). If backend moves out
+  // (e.g. Render/VPS because CF cannot call the plugin IP directly),
+  // set full origin here, e.g. "https://xxxx.onrender.com". No trailing slash.
+  const API_BASE = "";
 
   const state = {
     initData: "",
@@ -144,7 +148,7 @@
   async function api(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
     if (state.initData) headers["X-Telegram-Init-Data"] = state.initData;
-    const res = await fetch(path, Object.assign({}, opts, { headers }));
+    const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
     const raw = await res.text().catch(() => "");
     let data = null;
     try { data = raw ? JSON.parse(raw) : null; } catch (e) { data = null; }
