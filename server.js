@@ -301,6 +301,23 @@ app.get("*", (req, res, next) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// Self-ping: keeps free hosting awake by hitting the public URL
+// (traffic through the public URL counts as inbound activity).
+// Render sets RENDER_EXTERNAL_URL automatically; PUBLIC_URL overrides it.
+const SELF_URL = String(process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
+if (SELF_URL) {
+  const PING_EVERY_MS = 20000;
+  setInterval(async () => {
+    for (const p of ["/api/health", "/"]) {
+      try {
+        const r = await fetch(SELF_URL + p, { signal: AbortSignal.timeout(10000) });
+        await r.text().catch(() => {});
+      } catch (e) { /* stay silent, next round in 20s */ }
+    }
+  }, PING_EVERY_MS);
+  console.log(`[ok] self-ping on: ${SELF_URL} every 20s`);
+}
+
 app.listen(PORT, () => {
   console.log(`[ok] BuildZone Admin TMA (node) on :${PORT}, mock=${MOCK}`);
   console.log(`[ok] owners=${OWNER_IDS.length} moderators=${MODERATOR_IDS.length}`);
