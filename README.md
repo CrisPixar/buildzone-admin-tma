@@ -12,7 +12,7 @@ Admin console for Building Zone as Telegram Mini App. Warm design from building-
 - Backend calls GAME_API_URL with header X-Auth-Key: GAME_API_KEY
 - Key lives in backend env only, never in browser
 - Timeout 5s, on failure API answers offline:true and UI shows offline banner
-- Empty GAME_API_URL = mock mode with same JSON shapes
+- MOCK=1 enables mock mode with same JSON shapes
 
 ## Env
 - BOT_TOKEN - from @BotFather

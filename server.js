@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN || "";
 const GAME_API_URL = String(process.env.GAME_API_URL || "").replace(/\/$/, "");
 const GAME_API_KEY = process.env.GAME_API_KEY || "";
-const MOCK = !GAME_API_URL;
+const MOCK = /^(1|true|yes)$/i.test(String(process.env.MOCK || ""));
 const PLUGIN_TIMEOUT_MS = 5000;
 
 function parseIds(s) {

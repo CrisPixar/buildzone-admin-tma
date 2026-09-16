@@ -71,7 +71,7 @@ async function validateInitData(initData, botToken, maxAgeSec = 86400) {
 
 async function pluginCall(env, path, opts = {}) {
   const base = String(env.GAME_API_URL || "").replace(/\/$/, "");
-  if (!base) return { mock: true };
+  if (!base) return { error: "plugin not configured (set GAME_API_URL)", offline: true };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PLUGIN_TIMEOUT_MS);
   try {
@@ -170,7 +170,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const BOT_TOKEN = (env && env.BOT_TOKEN) || "";
-  const MOCK = !String((env && env.GAME_API_URL) || "").trim();
+  const MOCK = /^(1|true|yes)$/i.test(String((env && env.MOCK) || ""));
 
   const json = (obj, status = 200) =>
     new Response(JSON.stringify(obj), {
