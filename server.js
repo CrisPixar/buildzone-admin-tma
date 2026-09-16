@@ -1,6 +1,7 @@
-// BuildZone Admin TMA - backend
-// Node.js + Express backend with Telegram initData validation (HMAC-SHA256)
-// Stack: HTML/CSS/JS frontend in ./public, this file is the API + static server
+// BuildZone Admin TMA - Node.js backend (alternative to Pages Functions)
+// Same routes: Telegram initData auth + roles + proxy to plugin API (:26903)
+// Env: PORT, BOT_TOKEN, OWNER_IDS, MODERATOR_IDS (ADMIN_IDS = legacy alias),
+//      GAME_API_URL, GAME_API_KEY. Key never leaves this process.
 
 const crypto = require("crypto");
 const path = require("path");
@@ -11,27 +12,31 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN || "";
-const ADMIN_IDS = (process.env.ADMIN_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean)
-  .map(Number)
-  .filter((n) => Number.isSafeInteger(n));
+const GAME_API_URL = String(process.env.GAME_API_URL || "").replace(/\/$/, "");
+const GAME_API_KEY = process.env.GAME_API_KEY || "";
+const MOCK = !GAME_API_URL;
+const PLUGIN_TIMEOUT_MS = 5000;
 
-if (!BOT_TOKEN) {
-  console.warn("[warn] BOT_TOKEN is empty. Set it in .env . Auth will fail until set.");
+function parseIds(s) {
+  return String(s || "").split(",").map((x) => x.trim()).filter(Boolean).map(Number).filter((n) => Number.isSafeInteger(n));
 }
-if (ADMIN_IDS.length === 0) {
-  console.warn("[warn] ADMIN_IDS is empty. No user will get admin access until set.");
+const OWNER_IDS = parseIds(process.env.OWNER_IDS);
+const MODERATOR_IDS = [...parseIds(process.env.MODERATOR_IDS), ...parseIds(process.env.ADMIN_IDS)];
+
+function roleOf(uid) {
+  if (OWNER_IDS.includes(uid)) return "owner";
+  if (MODERATOR_IDS.includes(uid)) return "moderator";
+  return null;
+}
+function adminName(user) {
+  if (user.username) return "@" + user.username;
+  return [user.first_name, user.last_name].filter(Boolean).join(" ") || ("id" + user.id);
 }
 
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// ---------- Telegram initData validation ----------
-
-// Parse initData query string into plain object
 function parseInitData(initData) {
   const params = new URLSearchParams(initData || "");
   const out = {};
@@ -39,42 +44,21 @@ function parseInitData(initData) {
   return out;
 }
 
-// Validate hash per Telegram docs:
-// secret_key = HMAC_SHA256(key="WebAppData", msg=bot_token)
-// data_check_string = sort keys (except hash), join as "key=value" with \n
-// computed = HMAC_SHA256(key=secret_key, msg=data_check_string)
 function validateInitData(initData, botToken, maxAgeSec = 86400) {
-  if (!initData || !botToken) {
-    return { ok: false, error: "missing initData or bot token" };
-  }
+  if (!initData || !botToken) return { ok: false, error: "missing initData or bot token" };
   const data = parseInitData(initData);
   const receivedHash = data.hash || "";
   if (!receivedHash) return { ok: false, error: "missing hash" };
   delete data.hash;
-
-  const dataCheckString = Object.keys(data)
-    .sort()
-    .map((k) => `${k}=${data[k]}`)
-    .join("\n");
-
+  const dataCheckString = Object.keys(data).sort().map((k) => `${k}=${data[k]}`).join("\n");
   const secretKey = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
   const computedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-
-  // timing-safe compare
   const a = Buffer.from(computedHash, "utf8");
   const b = Buffer.from(receivedHash, "utf8");
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return { ok: false, error: "bad hash" };
-  }
-
-  // check auth_date freshness (anti-replay)
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false, error: "bad hash" };
   const authDate = Number(data.auth_date || 0);
   if (!authDate) return { ok: false, error: "missing auth_date" };
-  const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - authDate) > maxAgeSec) {
-    return { ok: false, error: "initData expired" };
-  }
-
+  if (Math.abs(Math.floor(Date.now() / 1000) - authDate) > maxAgeSec) return { ok: false, error: "initData expired" };
   let user = null;
   try {
     user = JSON.parse(data.user || "null");
@@ -82,12 +66,10 @@ function validateInitData(initData, botToken, maxAgeSec = 86400) {
     return { ok: false, error: "bad user json" };
   }
   if (!user || !user.id) return { ok: false, error: "missing user" };
-
-  return { ok: true, user, authDate, raw: data };
+  return { ok: true, user, authDate };
 }
 
 function getInitDataFromReq(req) {
-  // priority: Authorization header, x-telegram-init-data header, body.initData, query initData
   const h1 = req.headers["x-telegram-init-data"];
   if (h1) return String(h1);
   const auth = req.headers["authorization"] || "";
@@ -97,146 +79,215 @@ function getInitDataFromReq(req) {
   return "";
 }
 
-// Auth middleware: validates initData and admin allow-list
-function requireAdmin(req, res, next) {
-  const initData = getInitDataFromReq(req);
-  const v = validateInitData(initData, BOT_TOKEN);
-  if (!v.ok) {
-    return res.status(401).json({ ok: false, error: "unauthorized: " + v.error });
-  }
-  const uid = Number(v.user.id);
-  if (!ADMIN_IDS.includes(uid)) {
-    return res.status(403).json({ ok: false, error: "forbidden: not in ADMIN_IDS", user: { id: uid } });
-  }
+function needAuth(req, res, next) {
+  const v = validateInitData(getInitDataFromReq(req), BOT_TOKEN);
+  if (!v.ok) return res.status(401).json({ ok: false, error: "unauthorized: " + v.error });
+  const role = roleOf(Number(v.user.id));
+  if (!role) return res.status(403).json({ ok: false, error: "forbidden: not in admin list" });
   req.tgUser = v.user;
-  req.tgAuthDate = v.authDate;
+  req.role = role;
+  req.admin = adminName(v.user);
+  next();
+}
+function needOwner(req, res, next) {
+  if (req.role !== "owner") return res.status(403).json({ ok: false, error: "forbidden: owner only" });
   next();
 }
 
-// ---------- Demo in-memory data (replace with real DB) ----------
+async function pluginCall(p, opts = {}) {
+  try {
+    const res = await fetch(GAME_API_URL + p, {
+      method: opts.method || "GET",
+      headers: { "Content-Type": "application/json", "X-Auth-Key": GAME_API_KEY },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS)
+    });
+    const data = await res.json().catch(() => null);
+    if (res.status === 401) return { error: "bad GAME_API_KEY (plugin said 401)" };
+    if (res.status === 429) return { error: "plugin rate limited, retry later" };
+    if (!res.ok || !data) return { error: "plugin http " + res.status, offline: res.status >= 500 };
+    if (!data.ok) return { error: data.error || "plugin error" };
+    return { data: data.data };
+  } catch (e) {
+    return { error: "plugin unreachable", offline: true };
+  }
+}
+const passError = (res, r) => res.status(r.offline ? 502 : 400).json({ ok: false, error: r.error, offline: !!r.offline });
 
-const demoPlayers = [
-  { id: 1, nick: "Padjilloi", tgId: 111111111, status: "online", level: 42, builds: 128, lastSeen: "now", banned: false },
-  { id: 2, nick: "AstutePlot58", tgId: 222222222, status: "online", level: 37, builds: 96, lastSeen: "now", banned: false },
-  { id: 3, nick: "Dezik9410", tgId: 333333333, status: "offline", level: 51, builds: 210, lastSeen: "12 min ago", banned: false },
-  { id: 4, nick: "WaryMold3335", tgId: 444444444, status: "offline", level: 29, builds: 54, lastSeen: "1 h ago", banned: false },
-  { id: 5, nick: "UniBlock", tgId: 555555555, status: "banned", level: 15, builds: 11, lastSeen: "3 d ago", banned: true }
+// mock state (same contract as plugin)
+let mockChatId = 5312;
+const mockPlayers = [
+  { name: "Oxxygen", xuid: "", uuid: "a73a39b8-1111-4222-8333-0123456789ab", device_id: "b1177f8c001", ip: "176.108.188.2", ping: 33, os: "Android", gamemode: "Creative", x: -11, y: -36, z: -18, dimension: "Overworld", health: 20, is_op: true },
+  { name: "AstutePlot58", xuid: "2535000111222333", uuid: "c21d44aa-2222-4333-8444-1123456789ab", device_id: "c2220002", ip: "95.24.11.5", ping: 61, os: "Windows", gamemode: "Survival", x: 120, y: 64, z: -40, dimension: "Overworld", health: 18, is_op: false }
 ];
-
-const demoLogs = [
-  { ts: Date.now() - 1000 * 60 * 2, actor: "system", action: "server.online", detail: "124 players online" },
-  { ts: Date.now() - 1000 * 60 * 14, actor: "Padjilloi", action: "build.approved", detail: "Spawn plaza v3" },
-  { ts: Date.now() - 1000 * 60 * 47, actor: "moderation", action: "grief.rollback", detail: "12 chunks restored" },
-  { ts: Date.now() - 1000 * 60 * 90, actor: "Dezik9410", action: "player.warn", detail: "spam in chat" }
+const mockChat = [
+  { id: 5311, ts: Date.now() / 1000 - 320, type: "join", player: "AstutePlot58", text: "" },
+  { id: 5312, ts: Date.now() / 1000 - 60, type: "admin", player: "Oxxygen", text: "тихо, ивент через час" }
 ];
+const mockBans = [];
+const mockAudit = [];
+const mockNotes = new Map();
 
-function pushLog(actor, action, detail) {
-  demoLogs.unshift({ ts: Date.now(), actor, action, detail: String(detail || "").slice(0, 300) });
-  if (demoLogs.length > 200) demoLogs.length = 200;
+function mockResult(action, admin, name, reason) {
+  mockAudit.unshift({ ts: Date.now() / 1000, admin, action, target: name, details: reason || "" });
+  if (action === "ban" || action === "alban") {
+    if (!mockBans.some((b) => b.name === name)) {
+      mockBans.unshift({ name, xuid: "", uuid: "", device_id: "", ip: "", reason: reason || "", source: admin, created: Date.now() / 1000, kind: action });
+    }
+  }
+  if (action === "unban") {
+    const i = mockBans.findIndex((b) => b.name === name);
+    if (i >= 0) mockBans.splice(i, 1);
+  }
+  const verbs = { kick: "кикнут", ban: "забанен", alban: "забанен по всем идентификаторам", absoluter: "забанен (Absoluter)", unban: "разбанен" };
+  return { result: `Игрок ${name} ${verbs[action] || action}` };
 }
 
-// ---------- API ----------
+// ---------- routes ----------
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "buildzone-admin-tma", time: new Date().toISOString() });
+  res.json({ ok: true, service: "buildzone-admin-tma-node", mock: MOCK, time: new Date().toISOString() });
 });
 
-// Transparent login: frontend sends initData, backend validates hash + admin list
 app.post("/api/auth", (req, res) => {
-  const initData = getInitDataFromReq(req);
-  const v = validateInitData(initData, BOT_TOKEN);
-  if (!v.ok) {
-    return res.status(401).json({ ok: false, error: "unauthorized: " + v.error });
-  }
+  const v = validateInitData(getInitDataFromReq(req), BOT_TOKEN);
+  if (!v.ok) return res.status(401).json({ ok: false, error: "unauthorized: " + v.error });
   const uid = Number(v.user.id);
-  const isAdmin = ADMIN_IDS.includes(uid);
-  if (!isAdmin) {
+  const role = roleOf(uid);
+  if (!role) {
     return res.status(403).json({
       ok: false,
       error: "forbidden: your Telegram ID is not in admin list",
       user: { id: uid, username: v.user.username || "", first_name: v.user.first_name || "" }
     });
   }
-  pushLog(v.user.username || String(uid), "admin.login", "TMA auth ok");
-  return res.json({
-    ok: true,
-    user: {
-      id: v.user.id,
-      username: v.user.username || "",
-      first_name: v.user.first_name || "",
-      last_name: v.user.last_name || "",
-      photo_url: v.user.photo_url || ""
-    },
+  res.json({
+    ok: true, role, mock: MOCK,
+    user: { id: v.user.id, username: v.user.username || "", first_name: v.user.first_name || "", last_name: v.user.last_name || "", photo_url: v.user.photo_url || "" },
     authDate: v.authDate
   });
 });
 
-// All routes below require valid admin initData
-app.get("/api/stats", requireAdmin, (req, res) => {
-  const online = demoPlayers.filter((p) => p.status === "online").length;
-  res.json({
-    ok: true,
-    stats: {
-      online: 124 + online,
-      playersTotal: 1840,
-      buildsTotal: 632,
-      uptime: "99.9%",
-      season: 3,
-      pendingReports: 4,
-      todayJoins: 37
-    }
-  });
+app.get("/api/status", needAuth, async (req, res) => {
+  if (MOCK) return res.json({ ok: true, mock: true, status: { online: mockPlayers.length, max_players: 44, version: "1.21.50", uptime_sec: 151200, world: "Building Zone", tps: 19.8 } });
+  const r = await pluginCall("/api/status");
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, status: r.data });
 });
 
-app.get("/api/players", requireAdmin, (req, res) => {
-  const q = String(req.query.q || "").toLowerCase();
-  let list = demoPlayers;
-  if (q) list = list.filter((p) => p.nick.toLowerCase().includes(q) || String(p.tgId).includes(q));
-  res.json({ ok: true, players: list });
+app.get("/api/game/players", needAuth, async (req, res) => {
+  if (MOCK) return res.json({ ok: true, mock: true, players: mockPlayers });
+  const r = await pluginCall("/api/players");
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, players: r.data });
 });
 
-app.post("/api/players/:id/ban", requireAdmin, (req, res) => {
-  const id = Number(req.params.id);
-  const p = demoPlayers.find((x) => x.id === id);
-  if (!p) return res.status(404).json({ ok: false, error: "player not found" });
-  p.banned = true;
-  p.status = "banned";
-  pushLog(req.tgUser.username || String(req.tgUser.id), "player.ban", `${p.nick} banned. reason: ${req.body.reason || "no reason"}`);
-  res.json({ ok: true, player: p });
+app.get("/api/game/chat", needAuth, async (req, res) => {
+  const since = Number(req.query.since || 0);
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit || 100)));
+  if (MOCK) {
+    const msgs = mockChat.filter((m) => m.id > since).slice(-limit);
+    return res.json({ ok: true, mock: true, last_id: mockChat.length ? mockChat[mockChat.length - 1].id : 0, messages: msgs });
+  }
+  const r = await pluginCall(`/api/chat?since=${since}&limit=${limit}`);
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, last_id: r.data.last_id, messages: r.data.messages });
 });
 
-app.post("/api/players/:id/unban", requireAdmin, (req, res) => {
-  const id = Number(req.params.id);
-  const p = demoPlayers.find((x) => x.id === id);
-  if (!p) return res.status(404).json({ ok: false, error: "player not found" });
-  p.banned = false;
-  p.status = "offline";
-  pushLog(req.tgUser.username || String(req.tgUser.id), "player.unban", `${p.nick} unbanned`);
-  res.json({ ok: true, player: p });
-});
-
-app.post("/api/broadcast", requireAdmin, (req, res) => {
-  const text = String(req.body.text || "").trim();
+app.post("/api/game/chat", needAuth, async (req, res) => {
+  const text = String(req.body.text || "").trim().slice(0, 500);
   if (!text) return res.status(400).json({ ok: false, error: "empty text" });
-  if (text.length > 1000) return res.status(400).json({ ok: false, error: "text too long (max 1000)" });
-  // TODO: integrate real send via Bot API (sendMessage to channel or player list)
-  pushLog(req.tgUser.username || String(req.tgUser.id), "broadcast.send", text.slice(0, 120));
-  res.json({ ok: true, sent: 1840, preview: text.slice(0, 140) });
+  if (MOCK) {
+    mockChat.push({ id: ++mockChatId, ts: Date.now() / 1000, type: "admin", player: req.admin, text });
+    return res.json({ ok: true, mock: true, result: "отправлено в игровой чат", last_id: mockChatId });
+  }
+  const r = await pluginCall("/api/chat", { method: "POST", body: { admin: req.admin, text } });
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, result: r.data.result || "sent" });
 });
 
-app.get("/api/logs", requireAdmin, (req, res) => {
-  res.json({ ok: true, logs: demoLogs.slice(0, 100) });
+for (const action of ["kick", "ban", "alban", "absoluter"]) {
+  app.post("/api/game/" + action, needAuth, async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    const reason = String(req.body.reason || "").trim().slice(0, 300);
+    if (!name) return res.status(400).json({ ok: false, error: "empty name" });
+    if (MOCK) return res.json({ ok: true, mock: true, ...mockResult(action, req.admin, name, reason) });
+    const r = await pluginCall("/api/" + action, { method: "POST", body: { admin: req.admin, name, reason } });
+    if (r.error) return passError(res, r);
+    res.json({ ok: true, result: r.data.result || "done" });
+  });
+}
+
+app.post("/api/game/unban", needAuth, needOwner, async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  if (!name) return res.status(400).json({ ok: false, error: "empty name" });
+  if (MOCK) return res.json({ ok: true, mock: true, ...mockResult("unban", req.admin, name, "") });
+  const r = await pluginCall("/api/unban", { method: "POST", body: { admin: req.admin, name } });
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, result: r.data.result || "done" });
 });
 
-// SPA fallback for any non-API route
+app.get("/api/game/bans", needAuth, async (req, res) => {
+  if (MOCK) return res.json({ ok: true, mock: true, bans: mockBans });
+  const r = await pluginCall("/api/bans");
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, bans: r.data });
+});
+
+app.get("/api/game/plugins", needAuth, async (req, res) => {
+  if (MOCK) return res.json({ ok: true, mock: true, plugins: [{ name: "ocos", version: "1.3.0", enabled: true }] });
+  const r = await pluginCall("/api/plugins");
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, plugins: r.data });
+});
+
+app.get("/api/game/audit", needAuth, needOwner, async (req, res) => {
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit || 100)));
+  if (MOCK) return res.json({ ok: true, mock: true, audit: mockAudit.slice(0, limit) });
+  const r = await pluginCall(`/api/audit?limit=${limit}`);
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, audit: r.data });
+});
+
+app.get("/api/game/blocklog", needAuth, async (req, res) => {
+  const q = new URLSearchParams({
+    x: req.query.x || "0", y: req.query.y || "0", z: req.query.z || "0",
+    dimension: req.query.dimension || "Overworld",
+    limit: String(Math.min(100, Math.max(1, Number(req.query.limit || 40))))
+  }).toString();
+  if (MOCK) return res.json({ ok: true, mock: true, entries: [] });
+  const r = await pluginCall("/api/blocklog?" + q);
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, entries: r.data });
+});
+
+app.get("/api/notes", needAuth, (req, res) => {
+  const name = String(req.query.name || "").trim();
+  if (!name) return res.status(400).json({ ok: false, error: "empty name" });
+  res.json({ ok: true, notes: mockNotes.get(name.toLowerCase()) || [], storage: "memory" });
+});
+
+app.post("/api/notes", needAuth, (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const text = String(req.body.text || "").trim().slice(0, 500);
+  if (!name || !text) return res.status(400).json({ ok: false, error: "empty name or text" });
+  const note = { ts: Date.now() / 1000, by: req.admin, text };
+  const key = name.toLowerCase();
+  const list = mockNotes.get(key) || [];
+  list.push(note);
+  while (list.length > 50) list.shift();
+  mockNotes.set(key, list);
+  res.json({ ok: true, note, storage: "memory" });
+});
+
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(PORT, () => {
-  console.log(`[ok] BuildZone Admin TMA running on :${PORT}`);
-  console.log(`[ok] Admins configured: ${ADMIN_IDS.length}`);
+  console.log(`[ok] BuildZone Admin TMA (node) on :${PORT}, mock=${MOCK}`);
+  console.log(`[ok] owners=${OWNER_IDS.length} moderators=${MODERATOR_IDS.length}`);
 });
 
-module.exports = { app, validateInitData, parseInitData };
+module.exports = { app, validateInitData, parseInitData, roleOf };

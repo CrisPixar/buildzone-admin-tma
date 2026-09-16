@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800;900&family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./styles.css?v=b5">
+<link rel="stylesheet" href="./styles.css?v=b6">
 </head>
 <body>
 <div id="root">
@@ -30,12 +30,11 @@
   <nav class="nav" id="nav">
     <a href="#top" class="nav-logo">Building Zone <span class="nav-admin">// admin</span></a>
     <div class="nav-links" id="navLinks">
-      <a href="#overview">Обзор</a>
-      <a href="#ops">Консоль</a>
-      <a href="#players">Игроки</a>
-      <a href="#moderation">Модерация</a>
-      <a href="#broadcast">Рассылка</a>
-      <a href="#logs">Логи</a>
+      <a href="#online">Онлайн</a>
+      <a href="#chat">Чат</a>
+      <a href="#bans">Баны</a>
+      <a href="#plugins">Плагины</a>
+      <a href="#audit" id="auditNav">Аудит</a>
     </div>
     <div class="nav-right">
       <span class="net-mini" id="netStatus" title="connection"><i class="dot"></i><span id="netStatusText">auth</span></span>
@@ -43,8 +42,15 @@
         <img id="userAvatar" alt="avatar" hidden>
         <span id="userName">admin</span>
       </span>
+      <span class="role-pill" id="rolePill" hidden>mod</span>
     </div>
   </nav>
+
+  <!-- offline banner -->
+  <div class="offline-banner" id="offlineBanner" hidden>
+    <span id="offlineText">Сервер офлайн - плагин недоступен</span>
+    <button class="btn btn-mini ghost" id="btnOfflineRetry" type="button">Повторить</button>
+  </div>
 
   <!-- denied -->
   <section class="denied-wrap" id="screenDenied" hidden>
@@ -53,7 +59,8 @@
       <h2 class="section-title grad-text">Не из Хранителей</h2>
       <p class="section-sub" id="deniedText">Твой Telegram ID не входит в список администраторов.</p>
       <div class="denied-id" id="deniedId">id: -</div>
-      <p class="denied-hint">Попроси владельца добавить твой ID в ADMIN_IDS на сервере и открой приложение заново.</p>
+      <div class="denied-id debug" id="deniedDebug" hidden></div>
+      <p class="denied-hint">Попроси владельца добавить твой ID в OWNER_IDS или MODERATOR_IDS и открой приложение заново.</p>
       <button class="btn btn-primary" id="btnRetry" type="button">Проверить снова</button>
     </div>
   </section>
@@ -71,9 +78,9 @@
       <div class="hero-content">
         <div class="badge"><span class="dot"></span>Admin console - сезон 3</div>
         <h1 class="hero-title">Admin Zone</h1>
-        <p class="hero-sub">Пульс сервера, игроки, модерация и рассылки. Та же атмосфера Building Zone - теперь пульт управления.</p>
+        <p class="hero-sub">Онлайн, чат, баны и аудит. Пульт Хранителей Building Zone.</p>
         <div class="hero-btns">
-          <button class="btn btn-primary" id="btnRefresh" type="button">Обновить данные</button>
+          <button class="btn btn-primary" id="btnRefreshAll" type="button">Обновить все</button>
           <button class="btn btn-secondary" id="btnCopyIp" type="button">Скопировать IP</button>
         </div>
       </div>
@@ -81,98 +88,36 @@
 
     <!-- marquee -->
     <div class="marquee" aria-hidden="true">
-      <div class="marquee-track" id="marqueeTrack">
-        <span>Контроль <i>✦</i> Онлайн <i>✦</i> Модерация <i>✦</i> Рассылка <i>✦</i> Логи <i>✦</i> Сезон 3 <i>✦</i></span>
-        <span>Контроль <i>✦</i> Онлайн <i>✦</i> Модерация <i>✦</i> Рассылка <i>✦</i> Логи <i>✦</i> Сезон 3 <i>✦</i></span>
+      <div class="marquee-track">
+        <span>Онлайн <i>✦</i> Чат <i>✦</i> Баны <i>✦</i> Аудит <i>✦</i> Сезон 3 <i>✦</i></span>
+        <span>Онлайн <i>✦</i> Чат <i>✦</i> Баны <i>✦</i> Аудит <i>✦</i> Сезон 3 <i>✦</i></span>
       </div>
     </div>
 
-    <!-- 01 overview -->
-    <section class="about" id="overview">
+    <!-- 01 online -->
+    <section class="about" id="online">
       <div class="container">
         <div class="sec-head reveal">
-          <div class="sec-tag">01 - Обзор</div>
-          <h2 class="section-title grad-text">Пульс сервера</h2>
-          <p class="section-sub">Живые цифры Building Zone - все сезоны, все постройки, все игроки</p>
+          <div class="sec-tag">01 - Онлайн</div>
+          <h2 class="section-title grad-text">Кто в Зоне</h2>
+          <p class="section-sub">Живой список игроков - обновление каждые 5 секунд. Клик по нику открывает карточку</p>
         </div>
-        <div class="about-grid">
-          <div class="about-text reveal">
-            <p class="about-lead"><strong>Building Zone</strong> - творческое пространство, а это его пульт. Следи за онлайном и держи красоту сервера под контролем.</p>
-            <div class="stats">
-              <div class="stat"><div class="stat-num" id="stOnline">-</div><div class="stat-label">онлайн сейчас</div></div>
-              <div class="stat"><div class="stat-num" id="stPlayers">-</div><div class="stat-label">игроков всего</div></div>
-              <div class="stat"><div class="stat-num" id="stBuilds">-</div><div class="stat-label">построек на карте</div></div>
-              <div class="stat"><div class="stat-num" id="stUptime">-</div><div class="stat-label">аптайм 24/7</div></div>
-              <div class="stat"><div class="stat-num" id="stReports">-</div><div class="stat-label">репортов ждут</div></div>
-              <div class="stat"><div class="stat-num" id="stJoins">-</div><div class="stat-label">зашли сегодня</div></div>
-            </div>
-          </div>
-          <div class="about-visual reveal d2">
-            <div class="about-photo">
-              <picture>
-                <source srcset="https://buildzone.lol/images/seven.webp" type="image/webp">
-                <img src="https://buildzone.lol/images/seven.jpg" alt="Постройка игроков Building Zone" loading="lazy" decoding="async">
-              </picture>
-              <div class="about-photo-glow"></div>
-              <div class="about-badge">Сезон 3</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 02 ops terminal -->
-    <section class="connect" id="ops">
-      <div class="container">
-        <div class="sec-head reveal">
-          <div class="sec-tag">02 - Консоль</div>
-          <h2 class="section-title grad-text">Канал управления открыт</h2>
-          <p class="section-sub">Быстрые действия и живая лента консоли - как на странице подключения</p>
-        </div>
-        <div class="term reveal">
-          <div class="term-head">
-            <span class="t-dot r"></span>
-            <span class="t-dot y"></span>
-            <span class="t-dot g"></span>
-            <span class="term-title">building-zone - admin.exe</span>
-          </div>
-          <div class="term-body">
-            <div class="t-prompt"><span class="u">admin@buildzone</span>:<span class="c">~</span>$ status --live</div>
-            <div class="t-line"><span class="t-k">Адрес сервера</span><span class="t-val"><span class="t-v">play.buildzone.lol</span><button class="t-copy" type="button" data-copy="play.buildzone.lol">copy</button></span></div>
-            <div class="t-line"><span class="t-k">Порт</span><span class="t-val"><span class="t-v">25903</span><button class="t-copy" type="button" data-copy="25903">copy</button></span></div>
-            <div class="t-line"><span class="t-k">Полный адрес</span><span class="t-val"><span class="t-v">play.buildzone.lol:25903</span><button class="t-copy" type="button" data-copy="play.buildzone.lol:25903">copy</button></span></div>
-            <div class="t-line"><span class="t-k">Версия</span><span class="t-val"><span class="t-v">1.21.50-51</span></span></div>
-            <div class="t-line"><span class="t-k">Сайт</span><span class="t-val"><a class="t-v" href="https://buildzone.lol/" target="_blank" rel="noopener noreferrer">buildzone.lol</a></span></div>
-            <div class="t-actions">
-              <button class="t-copy" type="button" data-qa="restart">restart proxy</button>
-              <button class="t-copy" type="button" data-qa="backup">backup world</button>
-              <button class="t-copy" type="button" data-qa="whitelist">whitelist</button>
-              <button class="t-copy" type="button" data-qa="event">start event</button>
-            </div>
-            <p class="t-note" id="qaResult">Выбери действие. Демо-режим: команда только пишется в ленту ниже, пока не подключен RCON.</p>
-            <div class="t-feed" id="termBody">
-              <div>awaiting commands <span class="blink">▊</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 03 players -->
-    <section class="features" id="players">
-      <div class="container">
-        <div class="sec-head reveal">
-          <div class="sec-tag">03 - Игроки</div>
-          <h2 class="section-title grad-text">Жители Зоны</h2>
-          <p class="section-sub">Поиск по нику или Telegram ID - бан и разбан в один тап</p>
+        <div class="statusbar reveal">
+          <div class="sb-item"><span class="sb-k">онлайн</span><b id="sbOnline">-</b></div>
+          <div class="sb-item"><span class="sb-k">версия</span><b id="sbVersion">-</b></div>
+          <div class="sb-item"><span class="sb-k">tps</span><b id="sbTps">-</b></div>
+          <div class="sb-item"><span class="sb-k">аптайм</span><b id="sbUptime">-</b></div>
+          <div class="sb-item"><span class="sb-k">мир</span><b id="sbWorld">-</b></div>
+          <div class="sb-item" id="mockBadge" hidden><span class="sb-k">режим</span><b class="mock-t">MOCK</b></div>
         </div>
         <div class="panel reveal">
-          <div class="panel-head">
-            <div class="search"><input id="playerSearch" placeholder="Найти ника или ID..." autocomplete="off"></div>
+          <div class="panel-head row-between">
+            <span class="panel-title">Игроки онлайн - <span id="playersCount">0</span></span>
+            <span class="auto-note">авто - 5с</span>
           </div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>Ник</th><th>Статус</th><th>Уровень</th><th>Постройки</th><th>Был</th><th></th></tr></thead>
+              <thead><tr><th>Ник</th><th>ОС</th><th>Режим</th><th>Пинг</th><th>XYZ</th><th></th></tr></thead>
               <tbody id="playersBody"><tr><td colspan="6" class="td-muted">Загрузка...</td></tr></tbody>
             </table>
           </div>
@@ -180,82 +125,80 @@
       </div>
     </section>
 
-    <!-- 04 moderation -->
-    <section class="gallery" id="moderation">
+    <!-- 02 chat -->
+    <section class="connect" id="chat">
       <div class="container">
         <div class="sec-head reveal">
-          <div class="sec-tag">04 - Модерация</div>
-          <h2 class="section-title grad-text">Порядок в Зоне</h2>
-          <p class="section-sub">Очередь репортов и ручной бан - Хранители не спят</p>
-        </div>
-        <div class="mod-grid">
-          <div class="f-card reveal">
-            <span class="f-num">01</span>
-            <h3>Очередь репортов</h3>
-            <div class="report"><div><b>#1042 гриф?</b><div class="rep-sub">Plot 58 - скрины приложены</div></div><div class="row"><button class="btn btn-mini" type="button">Принять</button><button class="btn btn-mini ghost" type="button">Скрыть</button></div></div>
-            <div class="report"><div><b>#1041 спам</b><div class="rep-sub">Глобальный чат - флуд x12</div></div><div class="row"><button class="btn btn-mini" type="button">Мут 1ч</button><button class="btn btn-mini ghost" type="button">Скрыть</button></div></div>
-            <div class="report"><div><b>#1040 кража постройки</b><div class="rep-sub">Копия спавн-плазы</div></div><div class="row"><button class="btn btn-mini" type="button">Откат</button><button class="btn btn-mini ghost" type="button">Скрыть</button></div></div>
-            <div class="report"><div><b>#1039 плохой ник</b><div class="rep-sub">Запрос на переименование</div></div><div class="row"><button class="btn btn-mini" type="button">Переименовать</button><button class="btn btn-mini ghost" type="button">Скрыть</button></div></div>
-          </div>
-          <div class="f-card reveal d1">
-            <span class="f-num">02</span>
-            <h3>Банхаммер</h3>
-            <label class="field"><span>Ник или ID</span><input id="banTarget" placeholder="например Griefer123" autocomplete="off"></label>
-            <label class="field"><span>Причина</span><input id="banReason" placeholder="например гриф - откат сделан" autocomplete="off"></label>
-            <label class="field"><span>Срок</span>
-              <select id="banDuration"><option>1 час</option><option>1 день</option><option>7 дней</option><option selected>навсегда</option></select>
-            </label>
-            <button class="btn btn-secondary full" id="btnBan" type="button">Забанить игрока</button>
-            <p class="t-note" id="banResult">Демо: действие запишется в журнал ниже.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 05 broadcast -->
-    <section class="about" id="broadcast">
-      <div class="container">
-        <div class="sec-head reveal">
-          <div class="sec-tag">05 - Рассылка</div>
+          <div class="sec-tag">02 - Чат</div>
           <h2 class="section-title grad-text">Голос Зоны</h2>
-          <p class="section-sub">Одно сообщение - всем Хранителям и жителям сразу</p>
-        </div>
-        <div class="term reveal">
-          <div class="term-head">
-            <span class="t-dot r"></span>
-            <span class="t-dot y"></span>
-            <span class="t-dot g"></span>
-            <span class="term-title">building-zone - broadcast.exe</span>
-          </div>
-          <div class="term-body">
-            <div class="t-prompt"><span class="u">admin@buildzone</span>:<span class="c">~</span>$ say --all</div>
-            <label class="field"><span>Текст сообщения</span><textarea id="bcText" rows="4" maxlength="1000" placeholder="например Ивент сезона сегодня в 20:00 МСК - спавн-плаза. Будь там."></textarea></label>
-            <div class="bc-row">
-              <span class="bc-count"><span id="bcCount">0</span>/1000</span>
-              <span class="row"><button class="btn btn-mini ghost" id="btnBcPreview" type="button">Превью</button><button class="btn btn-mini" id="btnBcSend" type="button">Отправить</button></span>
-            </div>
-            <div class="bc-preview" id="bcPreview" hidden></div>
-            <p class="t-note" id="bcResult"></p>
-            <div class="term-cursor">1840 подписчиков в канале <span class="blink">▊</span></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 06 logs -->
-    <section class="connect" id="logs">
-      <div class="container">
-        <div class="sec-head reveal">
-          <div class="sec-tag">06 - Логи</div>
-          <h2 class="section-title grad-text">История в каждом блоке</h2>
-          <p class="section-sub">Кто, что и когда - летопись админки</p>
+          <p class="section-sub">Живая лента игры - новые сообщения каждые 2 секунды</p>
         </div>
         <div class="panel reveal">
-          <div class="panel-head row-between">
-            <span class="panel-title">Журнал действий</span>
-            <button class="btn btn-mini ghost" id="btnLogs" type="button">Обновить</button>
+          <div class="chat-filters">
+            <select id="chatType" aria-label="filter">
+              <option value="all">все типы</option>
+              <option value="chat">чат</option>
+              <option value="joinquit">входы/выходы</option>
+              <option value="death">смерти</option>
+              <option value="admin">админы</option>
+            </select>
+            <input id="chatSearch" placeholder="Поиск по нику или тексту..." autocomplete="off">
           </div>
-          <div class="logs" id="logsBox"><div class="td-muted">Загрузка...</div></div>
+          <div class="chat-box" id="chatBox"><div class="td-muted">Подключение к чату...</div></div>
+          <div class="chat-send">
+            <input id="chatInput" placeholder="Написать в игровой чат..." maxlength="500" autocomplete="off">
+            <button class="btn btn-mini" id="btnChatSend" type="button">Отправить</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 bans -->
+    <section class="features" id="bans">
+      <div class="container">
+        <div class="sec-head reveal">
+          <div class="sec-tag">03 - Баны</div>
+          <h2 class="section-title grad-text">Черный список</h2>
+          <p class="section-sub">Штатные баны и alban по всем идентификаторам</p>
+        </div>
+        <div class="panel reveal">
+          <div class="panel-head">
+            <div class="search"><input id="banSearch" placeholder="Поиск по нику или причине..." autocomplete="off"></div>
+          </div>
+          <div class="bans-list" id="bansBox"><div class="td-muted">Загрузка...</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 plugins -->
+    <section class="gallery" id="plugins">
+      <div class="container">
+        <div class="sec-head reveal">
+          <div class="sec-tag">04 - Плагины</div>
+          <h2 class="section-title grad-text">Механизмы Зоны</h2>
+          <p class="section-sub">Только чтение - что крутится на сервере</p>
+        </div>
+        <div class="panel reveal">
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Имя</th><th>Версия</th><th>Статус</th></tr></thead>
+              <tbody id="pluginsBody"><tr><td colspan="3" class="td-muted">Загрузка...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 audit (owner only) -->
+    <section class="about" id="audit">
+      <div class="container">
+        <div class="sec-head reveal">
+          <div class="sec-tag">05 - Аудит</div>
+          <h2 class="section-title grad-text">Летопись Хранителей</h2>
+          <p class="section-sub">Кто, когда, кого и за что - только для владельца</p>
+        </div>
+        <div class="panel reveal">
+          <div class="logs" id="auditBox"><div class="td-muted">Загрузка...</div></div>
         </div>
       </div>
     </section>
@@ -264,28 +207,71 @@
     <footer>
       <div class="f-logo">Building Zone</div>
       <div class="f-links">
-        <a href="#overview">Обзор</a>
-        <a href="#players">Игроки</a>
-        <a href="#moderation">Модерация</a>
-        <a href="#broadcast">Рассылка</a>
+        <a href="#online">Онлайн</a>
+        <a href="#chat">Чат</a>
+        <a href="#bans">Баны</a>
+        <a href="#plugins">Плагины</a>
       </div>
       <p>Admin console - Season 3 - создано для Хранителей</p>
-      <p class="f-ip" style="margin-top:10px">Сервер: play.buildzone.lol:25903 - Версия 1.21.50-51</p>
+      <p class="f-ip" style="margin-top:10px">Сервер: play.buildzone.lol:25903 - Версия 1.21.50</p>
       <p class="f-ip" style="margin-top:6px">build: <span id="buildTag">-</span></p>
     </footer>
     <div class="bottom-pad"></div>
   </div>
 </div>
 
+<!-- player card modal -->
+<div class="modal-ov" id="playerModal" hidden>
+  <div class="modal-card">
+    <div class="row-between">
+      <h3 id="pmNick">Игрок</h3>
+      <button class="btn btn-mini ghost" id="pmClose" type="button">Закрыть</button>
+    </div>
+    <div class="pm-grid" id="pmSummary"></div>
+    <h4>Последние сообщения</h4>
+    <div class="pm-chat" id="pmChat"></div>
+    <h4>История блока (Палка СК)</h4>
+    <div class="bl-form">
+      <input id="blX" inputmode="numeric" placeholder="X">
+      <input id="blY" inputmode="numeric" placeholder="Y">
+      <input id="blZ" inputmode="numeric" placeholder="Z">
+      <select id="blDim"><option>Overworld</option><option>Nether</option><option>The End</option></select>
+      <button class="btn btn-mini" id="btnBlGo" type="button">Найти</button>
+    </div>
+    <div class="pm-chat" id="blBox"><div class="td-muted">Введи координаты блока.</div></div>
+    <h4>Баны</h4>
+    <div class="pm-chat" id="pmBans"></div>
+    <h4>Заметки админов</h4>
+    <div class="pm-chat" id="notesBox"></div>
+    <div class="chat-send">
+      <input id="noteInput" placeholder="Новая заметка..." maxlength="500" autocomplete="off">
+      <button class="btn btn-mini" id="btnNoteAdd" type="button">Добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- confirm modal -->
+<div class="modal-ov" id="confirmModal" hidden>
+  <div class="modal-card small">
+    <h3 id="cfTitle">Подтверждение</h3>
+    <p class="cf-nick" id="cfNick"></p>
+    <label class="field" id="cfReasonWrap"><span>Причина</span><input id="cfReason" placeholder="например гриф" maxlength="300" autocomplete="off"></label>
+    <div class="row" style="margin-top:14px">
+      <button class="btn btn-mini danger" id="btnCfOk" type="button">Подтвердить</button>
+      <button class="btn btn-mini ghost" id="btnCfCancel" type="button">Отмена</button>
+    </div>
+  </div>
+</div>
+
 <!-- mobile bottom nav -->
 <nav class="bottomnav" id="bottomNav" hidden>
-  <a class="btab" href="#overview"><i>✦</i><span>Обзор</span></a>
-  <a class="btab" href="#ops"><i>⌘</i><span>Пульт</span></a>
-  <a class="btab" href="#players"><i>◍</i><span>Игроки</span></a>
-  <a class="btab" href="#moderation"><i>⬢</i><span>Мод</span></a>
-  <a class="btab" href="#logs"><i>☰</i><span>Логи</span></a>
+  <a class="btab" href="#online"><i>◍</i><span>Онлайн</span></a>
+  <a class="btab" href="#chat"><i>✦</i><span>Чат</span></a>
+  <a class="btab" href="#bans"><i>⬢</i><span>Баны</span></a>
+  <a class="btab" href="#plugins"><i>⌘</i><span>Плагины</span></a>
+  <a class="btab" href="#audit" id="auditTab"><i>☰</i><span>Аудит</span></a>
 </nav>
 
-<script src="./app.js?v=b5"></script>
+<script src="./app.js?v=b6"></script>
 </body>
 </html>
