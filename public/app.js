@@ -321,6 +321,8 @@
 
     initChrome();
     preSet(8, "auth");
+    const tag = $("buildTag");
+    if (tag) tag.textContent = BUILD;
 
     document.querySelectorAll("[data-copy]").forEach((b) => {
       b.addEventListener("click", () => copyText(b.dataset.copy || "", b));
