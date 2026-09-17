@@ -201,13 +201,19 @@ app.get("/api/game/players", needAuth, async (req, res) => {
 app.get("/api/game/chat", needAuth, async (req, res) => {
   const since = Number(req.query.since || 0);
   const limit = Math.min(200, Math.max(1, Number(req.query.limit || 100)));
+  const q = String(req.query.q || "").trim();
   if (MOCK) {
+    if (q) {
+      const needle = q.toLowerCase();
+      const msgs = mockChat.filter((m) => ((m.player || "") + " " + (m.text || "")).toLowerCase().includes(needle)).slice(-limit);
+      return res.json({ ok: true, mock: true, search: true, last_id: since, global_last: mockChatId, messages: msgs });
+    }
     const msgs = mockChat.filter((m) => m.id > since).slice(-limit);
-    return res.json({ ok: true, mock: true, last_id: mockChat.length ? mockChat[mockChat.length - 1].id : 0, messages: msgs });
+    return res.json({ ok: true, mock: true, last_id: mockChat.length ? mockChat[mockChat.length - 1].id : 0, global_last: mockChatId, messages: msgs });
   }
-  const r = await pluginCall(`/api/chat?since=${since}&limit=${limit}`);
+  const r = await pluginCall(`/api/chat?since=${since}&limit=${limit}` + (q ? `&q=${encodeURIComponent(q)}` : ""));
   if (r.error) return passError(res, r);
-  res.json({ ok: true, last_id: r.data.last_id, messages: r.data.messages });
+  res.json({ ok: true, last_id: r.data.last_id, global_last: r.data.global_last, search: !!r.data.search, messages: r.data.messages });
 });
 
 app.post("/api/game/chat", needAuth, async (req, res) => {
@@ -275,6 +281,23 @@ app.get("/api/game/blocklog", needAuth, async (req, res) => {
   const r = await pluginCall("/api/blocklog?" + q);
   if (r.error) return passError(res, r);
   res.json({ ok: true, entries: r.data });
+});
+
+app.get("/api/game/find", needAuth, async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  const limit = Math.min(25, Math.max(1, Number(req.query.limit || 8)));
+  if (MOCK) {
+    const needle = q.toLowerCase();
+    const known = mockPlayers.map((p) => ({
+      name: p.name, clean_name: String(p.name).replace(/§./g, ""), online: true,
+      xuid: p.xuid || "", device_id: p.device_id || "", last_ip: p.ip || ""
+    }));
+    const list = needle ? known.filter((k) => k.clean_name.toLowerCase().includes(needle)) : known;
+    return res.json({ ok: true, mock: true, found: list.slice(0, limit) });
+  }
+  const r = await pluginCall(`/api/find?q=${encodeURIComponent(q)}&limit=${limit}`);
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, found: r.data });
 });
 
 app.get("/api/notes", needAuth, (req, res) => {

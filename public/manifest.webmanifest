@@ -1,0 +1,9 @@
+{
+  "name": "Building Zone - Admin Panel",
+  "short_name": "BZ Admin",
+  "display": "standalone",
+  "background_color": "#0D0704",
+  "theme_color": "#0D0704",
+  "start_url": ".",
+  "icons": []
+}

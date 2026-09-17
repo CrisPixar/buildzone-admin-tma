@@ -34,4 +34,4 @@ Admin console for Building Zone as Telegram Mini App. Warm design from building-
 - Set env vars in Pages dashboard, then redeploy
 
 ## Pages
-Online (poll 5s, kick/ban/alban/absoluter with confirm), Chat (poll 2s, send, filters, search), Bans (search, owner unban), Plugins (readonly), Audit (owner), Player card modal (summary, chat excerpt, blocklog, bans, notes).
+Online (poll 5s, keyed rows, kick/ban/alban/absoluter with confirm), Chat (poll 2s, dedup by id, send, one-tap filter, search), Bans (search, owner unban, ban-by-nick with /find autocomplete), Plugins (readonly), Audit (owner), Player card modal (summary, chat excerpt, blocklog, bans, notes).

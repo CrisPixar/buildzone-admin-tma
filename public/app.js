@@ -1,4 +1,4 @@
-// BuildZone Admin TMA - frontend for plugin-backed spec
+// BuildZone Admin Panel - frontend for plugin-backed spec (plugin 1.0.2 fixes)
 // Pages: online, chat, bans, plugins, audit, player card modal
 // Auth: Telegram.WebApp.initData -> POST /api/auth (role: owner | moderator)
 
@@ -7,7 +7,7 @@
 
   const $ = (id) => document.getElementById(id);
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-  const BUILD = "b9-apibase";
+  const BUILD = "b10-fixes";
   // API base: empty = same origin (Pages Functions). If backend moves out
   // (e.g. Render/VPS because CF cannot call the plugin IP directly),
   // set full origin here, e.g. "https://xxxx.onrender.com". No trailing slash.
@@ -23,8 +23,18 @@
     bans: [],
     chatLog: [],
     chatLastId: 0,
+    chatFilter: "all",
+    chatInit: false,
+    chatInflight: false,
+    playersInflight: false,
+    playersInit: false,
+    atBottom: true,
+    pendingNew: 0,
     pmNick: null
   };
+
+  const shownIds = new Set();
+  const rowByKey = new Map();
 
   function haptic(kind) {
     try {
@@ -96,6 +106,14 @@
   function fmtTime(ts) {
     try {
       return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { hour12: false, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function fmtHM(ts) {
+    try {
+      return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { hour12: false, hour: "2-digit", minute: "2-digit" });
     } catch (e) {
       return "";
     }
@@ -215,7 +233,6 @@
       pill.hidden = false;
       pill.textContent = role === "owner" ? "owner" : "moder";
       pill.classList.toggle("owner", role === "owner");
-      // role gating: audit + unban are owner-only
       if (role !== "owner") {
         ["audit", "auditNav", "auditTab"].forEach((id) => {
           const el = $(id);
@@ -264,7 +281,7 @@
       const uid = e.data && e.data.user ? e.data.user.id : "-";
       let msg = e.message || "auth failed";
       if (e.status === 404 || e.status === 405) {
-        msg = "Backend API missing (http " + e.status + ") - deploy Pages Functions, then retry.";
+        msg = "Backend API missing (http " + e.status + ") - deploy backend, then retry.";
       }
       const dbg = "build " + BUILD +
         "\ninitData: " + (state.initData ? state.initData.length + " chars" : "MISSING") +
@@ -298,63 +315,118 @@
     { id: "absoluter", label: "Absoluter", needReason: false }
   ];
 
-  async function loadPlayers() {
+  function playerKey(name) {
+    return stripCodes(name).toLowerCase();
+  }
+
+  function playerPrint(p) {
+    return JSON.stringify([p.name, p.os, p.gamemode, p.ping, p.x, p.y, p.z, p.health, p.is_op]);
+  }
+
+  function buildPlayerRow(p) {
+    const tr = document.createElement("tr");
+    const nickTd = document.createElement("td");
+    const nickBtn = document.createElement("button");
+    nickBtn.type = "button";
+    nickBtn.className = "nick-btn";
+    nickBtn.onclick = () => openPlayer(p.name);
+    nickTd.appendChild(nickBtn);
+    tr.appendChild(nickTd);
+    const cellOs = document.createElement("td");
+    const cellGm = document.createElement("td");
+    const cellPing = document.createElement("td");
+    const cellXyz = document.createElement("td");
+    tr.append(cellOs, cellGm, cellPing, cellXyz);
+    const actTd = document.createElement("td");
+    const wrap = document.createElement("div");
+    wrap.className = "act-row";
+    ACTIONS.forEach((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn btn-mini danger";
+      b.textContent = a.label;
+      b.onclick = () => askConfirm(a, p.name);
+      wrap.appendChild(b);
+    });
+    actTd.appendChild(wrap);
+    tr.appendChild(actTd);
+    tr._cells = { nickBtn, cellOs, cellGm, cellPing, cellXyz };
+    paintPlayerRow(tr, p);
+    return tr;
+  }
+
+  function paintPlayerRow(tr, p) {
+    const c = tr._cells;
+    c.nickBtn.innerHTML = colorize(p.name) + (p.is_op ? "<small>OP</small>" : `<small>${escapeHtml(p.os || "")}</small>`);
+    c.cellOs.textContent = p.os || "-";
+    c.cellGm.textContent = p.gamemode || "-";
+    c.cellPing.textContent = String(p.ping ?? "-");
+    c.cellXyz.textContent = `${p.x} ${p.y} ${p.z}`;
+    tr._print = playerPrint(p);
+  }
+
+  // keyed update: only changed rows repaint, no full rebuild, no flicker
+  function updatePlayersTable() {
     const tBody = $("playersBody");
+    if (!state.playersInit) {
+      state.playersInit = true;
+      tBody.innerHTML = "";
+      rowByKey.clear();
+    }
+    const seen = new Set();
+    state.players.forEach((p) => {
+      const key = playerKey(p.name);
+      seen.add(key);
+      const print = playerPrint(p);
+      let tr = rowByKey.get(key);
+      if (!tr) {
+        tr = buildPlayerRow(p);
+        rowByKey.set(key, tr);
+        tBody.appendChild(tr);
+      } else if (tr._print !== print || tr._name !== p.name) {
+        tr._name = p.name;
+        paintPlayerRow(tr, p);
+      }
+    });
+    for (const [key, tr] of rowByKey) {
+      if (!seen.has(key)) {
+        tr.remove();
+        rowByKey.delete(key);
+      }
+    }
+    if (!state.players.length) {
+      tBody.innerHTML = '<tr><td colspan="6" class="td-muted">Никого онлайн.</td></tr>';
+      state.playersInit = false;
+      rowByKey.clear();
+    }
+    $("playersCount").textContent = String(state.players.length);
+  }
+
+  async function loadPlayers() {
+    if (state.playersInflight) return;
+    state.playersInflight = true;
     try {
       const r = await api("/api/game/players");
       state.players = r.players || [];
-      $("playersCount").textContent = String(state.players.length);
-      if (!state.players.length) {
-        tBody.innerHTML = '<tr><td colspan="6" class="td-muted">Никого онлайн.</td></tr>';
-        return;
-      }
-      tBody.innerHTML = "";
-      state.players.forEach((p) => {
-        const tr = document.createElement("tr");
-        const nickTd = document.createElement("td");
-        const nickBtn = document.createElement("button");
-        nickBtn.type = "button";
-        nickBtn.className = "nick-btn";
-        nickBtn.innerHTML = colorize(p.name) + (p.is_op ? "<small>OP</small>" : `<small>${escapeHtml(p.os || "")}</small>`);
-        nickBtn.onclick = () => openPlayer(p.name);
-        nickTd.appendChild(nickBtn);
-        tr.appendChild(nickTd);
-        const cells = [p.os || "-", p.gamemode || "-", String(p.ping ?? "-"), `${p.x} ${p.y} ${p.z}`];
-        cells.forEach((c) => {
-          const td = document.createElement("td");
-          td.textContent = c;
-          tr.appendChild(td);
-        });
-        const actTd = document.createElement("td");
-        const wrap = document.createElement("div");
-        wrap.className = "act-row";
-        ACTIONS.forEach((a) => {
-          const b = document.createElement("button");
-          b.type = "button";
-          b.className = "btn btn-mini danger";
-          b.textContent = a.label;
-          b.onclick = () => askConfirm(a, p.name);
-          wrap.appendChild(b);
-        });
-        actTd.appendChild(wrap);
-        tr.appendChild(actTd);
-        tBody.appendChild(tr);
-      });
+      updatePlayersTable();
     } catch (e) {
-      if (!noteOffline(e)) {
-        tBody.innerHTML = '<tr><td colspan="6" class="td-muted">Ошибка: ' + escapeHtml(e.message) + "</td></tr>";
+      if (!noteOffline(e) && !state.playersInit) {
+        $("playersBody").innerHTML = '<tr><td colspan="6" class="td-muted">Ошибка: ' + escapeHtml(e.message) + "</td></tr>";
       }
+    } finally {
+      state.playersInflight = false;
     }
   }
 
   /* ---------- chat ---------- */
 
+  const SYS_TEXT = { join: "зашел на сервер", quit: "вышел с сервера", death: "погиб" };
+
   function chatVisible(m) {
-    const f = $("chatType").value;
+    const f = state.chatFilter;
     const q = $("chatSearch").value.trim().toLowerCase();
     if (f === "chat" && m.type !== "chat") return false;
-    if (f === "joinquit" && m.type !== "join" && m.type !== "quit") return false;
-    if (f === "death" && m.type !== "death") return false;
+    if (f === "events" && m.type !== "join" && m.type !== "quit" && m.type !== "death") return false;
     if (f === "admin" && m.type !== "admin") return false;
     if (q) {
       const hay = (stripCodes(m.player) + " " + stripCodes(m.text)).toLowerCase();
@@ -363,40 +435,119 @@
     return true;
   }
 
-  function renderChat() {
+  function chatMsgNode(m) {
+    const d = document.createElement("div");
+    const sys = m.type === "join" || m.type === "quit" || m.type === "death";
+    d.className = "msg t-" + (m.type || "chat") + (sys ? " sys" : "");
+    const time = document.createElement("span");
+    time.className = "m-time";
+    time.textContent = fmtHM(m.ts);
+    time.title = fmtTime(m.ts);
+    d.appendChild(time);
+    if (sys) {
+      const t = document.createElement("span");
+      t.className = "m-text";
+      t.innerHTML = colorize(m.player || "") + " - " + (SYS_TEXT[m.type] || m.type) +
+        (m.type === "death" && m.text ? ": " + colorize(m.text) : "");
+      d.appendChild(t);
+    } else {
+      const nick = document.createElement("button");
+      nick.type = "button";
+      nick.className = "m-nick";
+      nick.innerHTML = colorize(m.player || "");
+      nick.title = stripCodes(m.player || "");
+      nick.onclick = () => openPlayer(m.player);
+      d.appendChild(nick);
+      const t = document.createElement("span");
+      t.className = "m-text";
+      t.innerHTML = colorize(m.text || "");
+      d.appendChild(t);
+    }
+    return d;
+  }
+
+  function fullRenderChat() {
     const box = $("chatBox");
+    box.innerHTML = "";
     const list = state.chatLog.filter(chatVisible).slice(-120);
     if (!list.length) {
       box.innerHTML = '<div class="td-muted">Сообщений нет.</div>';
       return;
     }
-    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-    box.innerHTML = "";
-    list.forEach((m) => {
-      const d = document.createElement("div");
-      d.className = "msg t-" + (m.type || "chat");
-      let textHtml = "";
-      if (m.type === "join") textHtml = '<span class="m-text">зашел на сервер</span>';
-      else if (m.type === "quit") textHtml = '<span class="m-text">вышел с сервера</span>';
-      else textHtml = '<div class="m-text">' + colorize(m.text || "") + "</div>";
-      d.innerHTML = `<div class="m-head"><span class="m-nick">${colorize(m.player || "")}</span><span class="m-time">${escapeHtml(fmtTime(m.ts))}</span></div>` + textHtml;
-      box.appendChild(d);
-    });
-    if (nearBottom) box.scrollTop = box.scrollHeight;
+    list.forEach((m) => box.appendChild(chatMsgNode(m)));
+    box.scrollTop = box.scrollHeight;
+    state.atBottom = true;
+    hidePill();
+  }
+
+  function updatePill() {
+    const pill = $("newMsgPill");
+    if (state.pendingNew > 0 && !state.atBottom) {
+      pill.hidden = false;
+      pill.textContent = `новые сообщения ↓ (${state.pendingNew})`;
+    } else {
+      pill.hidden = true;
+    }
+  }
+
+  function hidePill() {
+    state.pendingNew = 0;
+    $("newMsgPill").hidden = true;
+  }
+
+  function scrollChatBottom() {
+    const box = $("chatBox");
+    box.scrollTop = box.scrollHeight;
+    state.atBottom = true;
+    hidePill();
   }
 
   async function pollChat() {
+    if (state.chatInflight) return;
+    state.chatInflight = true;
     try {
       const r = await api(`/api/game/chat?since=${state.chatLastId}&limit=100`);
+      if (r.search) return; // search answers never touch the feed cursor
       const msgs = r.messages || [];
-      if (msgs.length) {
-        state.chatLog.push(...msgs);
-        if (state.chatLog.length > 400) state.chatLog.splice(0, state.chatLog.length - 400);
+      if (!state.chatInit) {
+        state.chatInit = true;
+        $("chatBox").innerHTML = "";
       }
-      if (r.last_id) state.chatLastId = r.last_id;
-      renderChat();
+      let added = 0;
+      for (const m of msgs) {
+        if (m.id == null || shownIds.has(m.id)) continue;
+        shownIds.add(m.id);
+        state.chatLog.push(m);
+        if (chatVisible(m)) {
+          const box = $("chatBox");
+          const empty = box.querySelector(".td-muted");
+          if (empty) empty.remove();
+          box.appendChild(chatMsgNode(m));
+          added++;
+        }
+      }
+      if (typeof r.last_id === "number") {
+        state.chatLastId = Math.max(state.chatLastId, r.last_id);
+      } else if (msgs.length) {
+        state.chatLastId = Math.max(state.chatLastId, ...msgs.map((m) => m.id).filter((x) => x != null));
+      }
+      if (state.chatLog.length > 400) {
+        state.chatLog.splice(0, state.chatLog.length - 400);
+        fullRenderChat();
+        return;
+      }
+      if (added > 0) {
+        if (state.atBottom) {
+          scrollChatBottom();
+        } else {
+          state.pendingNew += added;
+          updatePill();
+        }
+      }
     } catch (e) {
       noteOffline(e);
+    } finally {
+      state.chatInflight = false;
     }
   }
 
@@ -410,6 +561,7 @@
       haptic("ok");
       if (r.last_id) state.chatLastId = Math.max(state.chatLastId, r.last_id);
       await pollChat();
+      scrollChatBottom();
     } catch (e) {
       haptic("err");
       if (!noteOffline(e)) alert("Не отправлено: " + e.message);
@@ -506,11 +658,46 @@
     }
   }
 
+  /* ---------- ban by nick with autocomplete ---------- */
+
+  let findTimer = null;
+
+  async function findPlayers(q) {
+    const box = $("banSuggest");
+    try {
+      const r = await api("/api/game/find?q=" + encodeURIComponent(q) + "&limit=8");
+      const list = r.found || [];
+      if (!list.length) {
+        box.hidden = true;
+        return;
+      }
+      box.innerHTML = "";
+      list.forEach((f) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.innerHTML = `<span class="s-dot${f.online ? " on" : ""}"></span><span>${colorize(f.name)}</span><small>${f.online ? "online" : "offline"}</small>`;
+        b.onclick = () => {
+          $("banNickInput").value = stripCodes(f.name);
+          box.hidden = true;
+        };
+        box.appendChild(b);
+      });
+      box.hidden = false;
+    } catch (e) {
+      if (!noteOffline(e)) box.hidden = true;
+    }
+  }
+
   /* ---------- confirm modal ---------- */
 
   let pendingAction = null;
 
   function askConfirm(action, name) {
+    name = stripCodes(name).trim();
+    if (!name) {
+      haptic("err");
+      return;
+    }
     pendingAction = { action, name };
     $("cfTitle").textContent = action.label + " - подтверждение";
     $("cfNick").innerHTML = colorize(name);
@@ -552,7 +739,7 @@
   }
 
   async function openPlayer(name) {
-    state.pmNick = name;
+    state.pmNick = stripCodes(name);
     $("pmNick").innerHTML = colorize(name);
     $("playerModal").hidden = false;
     haptic("tap");
@@ -587,7 +774,7 @@
       $("blY").value = p.y;
       $("blZ").value = p.z;
     }
-    await loadNotes(name);
+    await loadNotes(state.pmNick);
   }
 
   async function lookupBlocklog() {
@@ -722,18 +909,55 @@
     };
     $("btnOfflineRetry").onclick = () => { haptic("tap"); refreshAll(); };
 
-    $("chatType").onchange = renderChat;
+    document.querySelectorAll("#chatSeg button").forEach((b) => {
+      b.onclick = () => {
+        document.querySelectorAll("#chatSeg button").forEach((x) => x.classList.remove("on"));
+        b.classList.add("on");
+        state.chatFilter = b.dataset.chatf;
+        haptic("tap");
+        if (state.chatInit) fullRenderChat();
+      };
+    });
     let chatT = null;
     $("chatSearch").addEventListener("input", () => {
       clearTimeout(chatT);
-      chatT = setTimeout(renderChat, 200);
+      chatT = setTimeout(() => { if (state.chatInit) fullRenderChat(); }, 200);
     });
+    $("chatBox").addEventListener("scroll", () => {
+      const box = $("chatBox");
+      state.atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+      if (state.atBottom) hidePill();
+    });
+    $("newMsgPill").onclick = () => { haptic("tap"); scrollChatBottom(); };
     $("btnChatSend").onclick = sendChat;
     $("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendChat();
     });
 
     $("banSearch").addEventListener("input", renderBans);
+
+    const nickInput = $("banNickInput");
+    nickInput.addEventListener("input", () => {
+      clearTimeout(findTimer);
+      const q = nickInput.value.trim();
+      if (!q) {
+        $("banSuggest").hidden = true;
+        return;
+      }
+      findTimer = setTimeout(() => findPlayers(q), 250);
+    });
+    nickInput.addEventListener("blur", () => {
+      setTimeout(() => { $("banSuggest").hidden = true; }, 200);
+    });
+    nickInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") $("banSuggest").hidden = true;
+    });
+    document.querySelectorAll("[data-nickact]").forEach((b) => {
+      b.onclick = () => {
+        const meta = ACTIONS.find((a) => a.id === b.dataset.nickact);
+        if (meta) askConfirm(meta, nickInput.value);
+      };
+    });
 
     $("btnCfOk").onclick = doConfirmed;
     $("btnCfCancel").onclick = () => { $("confirmModal").hidden = true; pendingAction = null; };

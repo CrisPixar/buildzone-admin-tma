@@ -124,6 +124,22 @@ const mockAudit = [
   { ts: Date.now() / 1000 - 86400, admin: "Oxxygen", action: "alban", target: "ltRealme2", details: "грифинг" },
   { ts: Date.now() / 1000 - 4000, admin: "Oxxygen", action: "kick", target: "Steve The Builder", details: "афк на спавне" }
 ];
+const mockKnownExtra = [
+  { name: "OldGriefer", clean_name: "OldGriefer", online: false, xuid: "2535111111111111", device_id: "dev-old", last_ip: "2.2.2.2" }
+];
+function mockFind(q, limit) {
+  const known = mockPlayers.map((p) => ({
+    name: p.name,
+    clean_name: String(p.name).replace(/§./g, ""),
+    online: true,
+    xuid: p.xuid || "",
+    device_id: p.device_id || "",
+    last_ip: p.ip || ""
+  })).concat(mockKnownExtra);
+  const needle = String(q || "").toLowerCase();
+  const list = needle ? known.filter((k) => k.clean_name.toLowerCase().includes(needle)) : known;
+  return list.slice(0, limit);
+}
 const mockNotesMem = new Map();
 
 function mockResult(action, admin, name, reason) {
@@ -272,17 +288,23 @@ export async function onRequest(context) {
     return json({ ok: true, players: r.data });
   }
 
-  // GET /api/game/chat?since&limit
+  // GET /api/game/chat?since&limit&q - q triggers plugin search mode (search:true, cursor untouched)
   if (route === "game/chat" && request.method === "GET") {
     const since = Number(url.searchParams.get("since") || 0);
     const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 100)));
+    const q = (url.searchParams.get("q") || "").trim();
     if (MOCK) {
+      if (q) {
+        const needle = q.toLowerCase();
+        const msgs = mockChat.filter((m) => ((m.player || "") + " " + (m.text || "")).toLowerCase().includes(needle)).slice(-limit);
+        return json({ ok: true, mock: true, search: true, last_id: since, global_last: mockChatId, messages: msgs });
+      }
       const msgs = mockChat.filter((m) => m.id > since).slice(-limit);
-      return json({ ok: true, mock: true, last_id: mockChat.length ? mockChat[mockChat.length - 1].id : 0, messages: msgs });
+      return json({ ok: true, mock: true, last_id: mockChat.length ? mockChat[mockChat.length - 1].id : 0, global_last: mockChatId, messages: msgs });
     }
-    const r = await pluginCall(env, `/api/chat?since=${since}&limit=${limit}`);
+    const r = await pluginCall(env, `/api/chat?since=${since}&limit=${limit}` + (q ? `&q=${encodeURIComponent(q)}` : ""));
     if (r.error) return passError(r);
-    return json({ ok: true, last_id: r.data.last_id, messages: r.data.messages });
+    return json({ ok: true, last_id: r.data.last_id, global_last: r.data.global_last, search: !!r.data.search, messages: r.data.messages });
   }
 
   // POST /api/game/chat {text}
@@ -371,6 +393,16 @@ export async function onRequest(context) {
     const r = await pluginCall(env, "/api/blocklog?" + q);
     if (r.error) return passError(r);
     return json({ ok: true, entries: r.data });
+  }
+
+  // GET /api/game/find?q&limit - search among ALL known players (plugin 1.0.2)
+  if (route === "game/find" && request.method === "GET") {
+    const q = (url.searchParams.get("q") || "").trim();
+    const limit = Math.min(25, Math.max(1, Number(url.searchParams.get("limit") || 8)));
+    if (MOCK) return json({ ok: true, mock: true, found: mockFind(q, limit) });
+    const r = await pluginCall(env, `/api/find?q=${encodeURIComponent(q)}&limit=${limit}`);
+    if (r.error) return passError(r);
+    return json({ ok: true, found: r.data });
   }
 
   // GET /api/notes?name - admin notes (KV or memory)

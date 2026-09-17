@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Building Zone - Admin</title>
+<title>Building Zone - Admin Panel</title>
 <meta name="description" content="Building Zone - admin console as Telegram Mini App.">
 <meta name="theme-color" content="#0D0704">
+<link rel="manifest" href="./manifest.webmanifest">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800;900&family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./styles.css?v=b9">
+<link rel="stylesheet" href="./styles.css?v=b10">
 </head>
 <body>
 <div id="root">
@@ -77,7 +78,7 @@
       <div class="hero-side right">play.buildzone.lol : 25903</div>
       <div class="hero-content">
         <div class="badge"><span class="dot"></span>Admin console - сезон 3</div>
-        <h1 class="hero-title">Admin Zone</h1>
+        <h1 class="hero-title">Admin Panel</h1>
         <p class="hero-sub">Онлайн, чат, баны и аудит. Пульт Хранителей Building Zone.</p>
         <div class="hero-btns">
           <button class="btn btn-primary" id="btnRefreshAll" type="button">Обновить все</button>
@@ -135,16 +136,18 @@
         </div>
         <div class="panel reveal">
           <div class="chat-filters">
-            <select id="chatType" aria-label="filter">
-              <option value="all">все типы</option>
-              <option value="chat">чат</option>
-              <option value="joinquit">входы/выходы</option>
-              <option value="death">смерти</option>
-              <option value="admin">админы</option>
-            </select>
+            <div class="seg" id="chatSeg">
+              <button type="button" class="on" data-chatf="all">Все</button>
+              <button type="button" data-chatf="chat">Чат</button>
+              <button type="button" data-chatf="events">События</button>
+              <button type="button" data-chatf="admin">Админы</button>
+            </div>
             <input id="chatSearch" placeholder="Поиск по нику или тексту..." autocomplete="off">
           </div>
-          <div class="chat-box" id="chatBox"><div class="td-muted">Подключение к чату...</div></div>
+          <div class="chat-wrap">
+            <div class="chat-box" id="chatBox"><div class="td-muted">Подключение к чату...</div></div>
+            <button class="newmsg-pill" id="newMsgPill" type="button" hidden>новые сообщения ↓</button>
+          </div>
           <div class="chat-send">
             <input id="chatInput" placeholder="Написать в игровой чат..." maxlength="500" autocomplete="off">
             <button class="btn btn-mini" id="btnChatSend" type="button">Отправить</button>
@@ -160,6 +163,20 @@
           <div class="sec-tag">03 - Баны</div>
           <h2 class="section-title grad-text">Черный список</h2>
           <p class="section-sub">Штатные баны и alban по всем идентификаторам</p>
+        </div>
+        <div class="panel reveal">
+          <div class="panel-head"><span class="panel-title">Забанить по нику</span></div>
+          <div class="nickban">
+            <div class="nickban-input">
+              <input id="banNickInput" placeholder="Введи ник (онлайн не обязателен)..." autocomplete="off">
+              <div class="suggest" id="banSuggest" hidden></div>
+            </div>
+            <div class="row">
+              <button class="btn btn-mini danger" type="button" data-nickact="ban">Бан</button>
+              <button class="btn btn-mini danger" type="button" data-nickact="alban">Alban</button>
+              <button class="btn btn-mini danger" type="button" data-nickact="absoluter">Absoluter</button>
+            </div>
+          </div>
         </div>
         <div class="panel reveal">
           <div class="panel-head">
@@ -272,6 +289,6 @@
   <a class="btab" href="#audit" id="auditTab"><i>☰</i><span>Аудит</span></a>
 </nav>
 
-<script src="./app.js?v=b9"></script>
+<script src="./app.js?v=b10"></script>
 </body>
 </html>
