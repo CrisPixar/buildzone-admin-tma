@@ -1,7 +1,7 @@
 // BuildZone Admin bot: /start gate, panel button, owner request stats.
 // Long polling inside the Render Node service (started from server.js).
 // Env: BOT_TOKEN, OWNER_IDS, MODERATOR_IDS (ADMIN_IDS = legacy alias), PANEL_URL.
-// Local runs must keep ENABLE_BOT empty or they steal updates from prod.
+// Polling is ON by default. Local runs must set ENABLE_BOT=0 or they steal updates from prod.
 
 const TG = "https://api.telegram.org/bot";
 const DENIED = "Не-авторизованный запрос";

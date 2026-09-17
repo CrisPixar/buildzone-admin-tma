@@ -35,7 +35,7 @@ Admin console for Building Zone as Telegram Mini App. Warm design from building-
 
 ## Telegram bot
 - Lives in bot.js, runs inside the Node service with long polling
-- Needs ENABLE_BOT=1 (production only, local runs steal updates) + BOT_TOKEN + PANEL_URL (frontend Mini App URL)
+- Polling is ON by default, needs BOT_TOKEN + PANEL_URL (frontend Mini App URL); set ENABLE_BOT=0 on local runs so they never steal updates from prod
 - /start checks OWNER_IDS/MODERATOR_IDS: admins get greeting + panel button, owner also gets stats button, outsiders get denial text
 - Request stats: in-memory counters of /api/* calls (total, per endpoint, 4xx/5xx), reset on restart
 

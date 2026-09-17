@@ -426,9 +426,11 @@ if (SELF_URL) {
   console.log(`[ok] self-ping on: ${SELF_URL} every 20s`);
 }
 
-// Telegram bot: long polling inside this process. ENABLE_BOT=1 only in
-// production - a local run would steal updates from the live bot.
-if (/^(1|true|yes)$/i.test(String(process.env.ENABLE_BOT || ""))) {
+// Telegram bot: long polling inside this process, ON by default.
+// Set ENABLE_BOT=0 to disable (do it on local runs, or they steal
+// updates from the live bot and users get double replies).
+const BOT_OFF = /^(0|false|no|off)$/i.test(String(process.env.ENABLE_BOT || ""));
+if (!BOT_OFF) {
   try {
     startBot(getStats);
     console.log("[ok] telegram bot polling started");
@@ -436,7 +438,7 @@ if (/^(1|true|yes)$/i.test(String(process.env.ENABLE_BOT || ""))) {
     console.log("[bot] failed to start:", e.message);
   }
 } else {
-  console.log("[bot] polling off (set ENABLE_BOT=1 to run the Telegram bot)");
+  console.log("[bot] polling off (ENABLE_BOT=0)");
 }
 
 app.listen(PORT, () => {
