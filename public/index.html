@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800;900&family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./styles.css?v=b10">
+<link rel="stylesheet" href="./styles.css?v=b11">
 </head>
 <body>
 <div id="root">
@@ -31,11 +31,13 @@
   <nav class="nav" id="nav">
     <a href="#top" class="nav-logo">Building Zone <span class="nav-admin">// admin</span></a>
     <div class="nav-links" id="navLinks">
-      <a href="#online">Онлайн</a>
+      <a href="#online">Игроки</a>
       <a href="#chat">Чат</a>
-      <a href="#bans">Баны</a>
+      <a href="#bans">Блокировки</a>
       <a href="#plugins">Плагины</a>
-      <a href="#audit" id="auditNav">Аудит</a>
+      <a href="#audit" id="auditNav">Журнал действий</a>
+      <a href="#metrics">Нагрузка</a>
+      <a href="#power" id="powerNav">Управление сервером</a>
     </div>
     <div class="nav-right">
       <span class="net-mini" id="netStatus" title="connection"><i class="dot"></i><span id="netStatusText">auth</span></span>
@@ -81,7 +83,7 @@
         <h1 class="hero-title">Admin Panel</h1>
         <p class="hero-sub">Онлайн, чат, баны и аудит. Пульт Хранителей Building Zone.</p>
         <div class="hero-btns">
-          <button class="btn btn-primary" id="btnRefreshAll" type="button">Обновить все</button>
+          <button class="btn btn-primary" id="btnRefreshAll" type="button">Обновить</button>
           <button class="btn btn-secondary" id="btnCopyIp" type="button">Скопировать IP</button>
         </div>
       </div>
@@ -99,7 +101,7 @@
     <section class="about" id="online">
       <div class="container">
         <div class="sec-head reveal">
-          <div class="sec-tag">01 - Онлайн</div>
+          <div class="sec-tag">01 - Игроки</div>
           <h2 class="section-title grad-text">Кто в Зоне</h2>
           <p class="section-sub">Живой список игроков - обновление каждые 5 секунд. Клик по нику открывает карточку</p>
         </div>
@@ -107,7 +109,7 @@
           <div class="sb-item"><span class="sb-k">онлайн</span><b id="sbOnline">-</b></div>
           <div class="sb-item"><span class="sb-k">версия</span><b id="sbVersion">-</b></div>
           <div class="sb-item"><span class="sb-k">tps</span><b id="sbTps">-</b></div>
-          <div class="sb-item"><span class="sb-k">аптайм</span><b id="sbUptime">-</b></div>
+          <div class="sb-item"><span class="sb-k">время работы</span><b id="sbUptime">-</b></div>
           <div class="sb-item"><span class="sb-k">мир</span><b id="sbWorld">-</b></div>
           <div class="sb-item" id="mockBadge" hidden><span class="sb-k">режим</span><b class="mock-t">MOCK</b></div>
         </div>
@@ -118,7 +120,7 @@
           </div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>Ник</th><th>ОС</th><th>Режим</th><th>Пинг</th><th>XYZ</th><th></th></tr></thead>
+              <thead><tr><th>Ник</th><th>ОС</th><th>Режим</th><th>Пинг</th><th>Координаты</th><th></th></tr></thead>
               <tbody id="playersBody"><tr><td colspan="6" class="td-muted">Загрузка...</td></tr></tbody>
             </table>
           </div>
@@ -160,7 +162,7 @@
     <section class="features" id="bans">
       <div class="container">
         <div class="sec-head reveal">
-          <div class="sec-tag">03 - Баны</div>
+          <div class="sec-tag">03 - Блокировки</div>
           <h2 class="section-title grad-text">Черный список</h2>
           <p class="section-sub">Штатные баны и alban по всем идентификаторам</p>
         </div>
@@ -172,7 +174,7 @@
               <div class="suggest" id="banSuggest" hidden></div>
             </div>
             <div class="row">
-              <button class="btn btn-mini danger" type="button" data-nickact="ban">Бан</button>
+              <button class="btn btn-mini danger" type="button" data-nickact="ban">Забанить</button>
               <button class="btn btn-mini danger" type="button" data-nickact="alban">Alban</button>
               <button class="btn btn-mini danger" type="button" data-nickact="absoluter">Absoluter</button>
             </div>
@@ -210,7 +212,7 @@
     <section class="about" id="audit">
       <div class="container">
         <div class="sec-head reveal">
-          <div class="sec-tag">05 - Аудит</div>
+          <div class="sec-tag">05 - Журнал действий</div>
           <h2 class="section-title grad-text">Летопись Хранителей</h2>
           <p class="section-sub">Кто, когда, кого и за что - только для владельца</p>
         </div>
@@ -220,14 +222,71 @@
       </div>
     </section>
 
+    <!-- 06 metrics -->
+    <section class="connect" id="metrics">
+      <div class="container">
+        <div class="sec-head reveal">
+          <div class="sec-tag">06 - Нагрузка</div>
+          <h2 class="section-title grad-text">Нагрузка сервера</h2>
+          <p class="section-sub">Живые метрики железа и игры - обновление каждые 5 секунд</p>
+        </div>
+        <div class="tiles reveal">
+          <div class="tile"><span class="sb-k">ЦП</span><b id="mCpuV">…</b><div class="bar"><i id="mCpuBar"></i></div><small id="mCpuS">-</small></div>
+          <div class="tile"><span class="sb-k">ОЗУ</span><b id="mMemV">…</b><div class="bar"><i id="mMemBar"></i></div><small id="mMemS">-</small></div>
+          <div class="tile"><span class="sb-k">Диск</span><b id="mDiskV">…</b><div class="bar"><i id="mDiskBar"></i></div><small id="mDiskS">-</small></div>
+          <div class="tile"><span class="sb-k">TPS</span><b id="mTpsV">…</b><div class="bar"><i id="mTpsBar"></i></div><small id="mTpsS">-</small></div>
+        </div>
+        <div class="panel reveal">
+          <div class="panel-head row-between">
+            <span class="panel-title">График за 30 минут</span>
+            <span class="auto-note" id="mUptime">время работы: -</span>
+          </div>
+          <svg class="chart" id="mChart" viewBox="0 0 600 180" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="legend"><span><i class="lg-cpu"></i>ЦП</span><span><i class="lg-mem"></i>ОЗУ</span><span><i class="lg-tps"></i>TPS</span></div>
+          <div class="m-rows">
+            <div>Средняя нагрузка: <b id="mLoad">-</b></div>
+            <div>Занято сервером: <b id="mRss">-</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 power -->
+    <section class="gallery" id="power">
+      <div class="container">
+        <div class="sec-head reveal">
+          <div class="sec-tag">07 - Управление сервером</div>
+          <h2 class="section-title grad-text">Питание сервера</h2>
+          <p class="section-sub">Перезапуск и остановка - только для допущенных. Права проверяет плагин</p>
+        </div>
+        <div class="panel reveal" id="powerPanel">
+          <div class="locked-banner" id="powerLocked" hidden>Управление питанием временно заблокировано владельцем</div>
+          <p class="deny-text" id="powerDeny" hidden></p>
+          <div id="powerControls" hidden>
+            <div class="row">
+              <button class="btn btn-secondary" id="btnRestart" type="button">Перезапустить</button>
+              <button class="btn btn-mini danger" id="btnStop" type="button">Остановить</button>
+            </div>
+            <p class="t-note" id="powerState"></p>
+          </div>
+          <div class="power-start" id="powerStart" hidden>
+            <button class="btn btn-mini ghost" type="button" disabled>Запустить</button>
+            <p class="t-note" id="powerStartHint"></p>
+            <a class="btn btn-mini" id="powerHostLink" href="#" target="_blank" rel="noopener noreferrer">Открыть панель хостинга</a>
+          </div>
+          <div class="countdown" id="powerCountdown" hidden></div>
+        </div>
+      </div>
+    </section>
+
     <!-- footer -->
     <footer>
       <div class="f-logo">Building Zone</div>
       <div class="f-links">
-        <a href="#online">Онлайн</a>
+        <a href="#online">Игроки</a>
         <a href="#chat">Чат</a>
-        <a href="#bans">Баны</a>
-        <a href="#plugins">Плагины</a>
+        <a href="#bans">Блокировки</a>
+        <a href="#metrics">Нагрузка</a>
       </div>
       <p>Admin console - Season 3 - создано для Хранителей</p>
       <p class="f-ip" style="margin-top:10px">Сервер: play.buildzone.lol:25903 - Версия 1.21.50</p>
@@ -247,7 +306,7 @@
     <div class="pm-grid" id="pmSummary"></div>
     <h4>Последние сообщения</h4>
     <div class="pm-chat" id="pmChat"></div>
-    <h4>История блока (Палка СК)</h4>
+    <h4>История блоков</h4>
     <div class="bl-form">
       <input id="blX" inputmode="numeric" placeholder="X">
       <input id="blY" inputmode="numeric" placeholder="Y">
@@ -256,13 +315,25 @@
       <button class="btn btn-mini" id="btnBlGo" type="button">Найти</button>
     </div>
     <div class="pm-chat" id="blBox"><div class="td-muted">Введи координаты блока.</div></div>
-    <h4>Баны</h4>
+    <h4>Блокировки</h4>
     <div class="pm-chat" id="pmBans"></div>
     <h4>Заметки админов</h4>
     <div class="pm-chat" id="notesBox"></div>
     <div class="chat-send">
       <input id="noteInput" placeholder="Новая заметка..." maxlength="500" autocomplete="off">
       <button class="btn btn-mini" id="btnNoteAdd" type="button">Добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- power confirm modal -->
+<div class="modal-ov" id="powerModal" hidden>
+  <div class="modal-card small">
+    <h3 id="pwTitle">Подтверждение</h3>
+    <p class="cf-nick pw-text" id="pwText"></p>
+    <div class="row" style="margin-top:14px">
+      <button class="btn btn-mini danger" id="btnPowerYes" type="button">Да</button>
+      <button class="btn btn-mini ghost" id="btnPowerNo" type="button">Отмена</button>
     </div>
   </div>
 </div>
@@ -281,14 +352,16 @@
 </div>
 
 <!-- mobile bottom nav -->
-<nav class="bottomnav" id="bottomNav" hidden>
-  <a class="btab" href="#online"><i>◍</i><span>Онлайн</span></a>
+<nav class="bottomnav scroll" id="bottomNav" hidden>
+  <a class="btab" href="#online"><i>◍</i><span>Игроки</span></a>
   <a class="btab" href="#chat"><i>✦</i><span>Чат</span></a>
-  <a class="btab" href="#bans"><i>⬢</i><span>Баны</span></a>
+  <a class="btab" href="#bans"><i>⬢</i><span>Блокировки</span></a>
   <a class="btab" href="#plugins"><i>⌘</i><span>Плагины</span></a>
-  <a class="btab" href="#audit" id="auditTab"><i>☰</i><span>Аудит</span></a>
+  <a class="btab" href="#audit" id="auditTab"><i>☰</i><span>Журнал</span></a>
+  <a class="btab" href="#metrics"><i>◈</i><span>Нагрузка</span></a>
+  <a class="btab" href="#power" id="powerTab"><i>⏻</i><span>Сервер</span></a>
 </nav>
 
-<script src="./app.js?v=b10"></script>
+<script src="./app.js?v=b11"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
-// BuildZone Admin Panel - frontend for plugin-backed spec (plugin 1.0.2 fixes)
-// Pages: online, chat, bans, plugins, audit, player card modal
+// BuildZone Admin Panel - frontend (plugin 1.2.0: metrics + power)
+// Pages: players, chat, bans, plugins, audit, metrics, power
 // Auth: Telegram.WebApp.initData -> POST /api/auth (role: owner | moderator)
 
 (function () {
@@ -7,11 +7,10 @@
 
   const $ = (id) => document.getElementById(id);
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-  const BUILD = "b10-fixes";
-  // API base: empty = same origin (Pages Functions). If backend moves out
-  // (e.g. Render/VPS because CF cannot call the plugin IP directly),
-  // set full origin here, e.g. "https://xxxx.onrender.com". No trailing slash.
-  const API_BASE = "";
+  const BUILD = "b11-power";
+  // Backend lives on Render behind a custom domain (CF Pages cannot call
+  // the plugin IP directly - edge answers 1003). Same-origin fallback: "".
+  const API_BASE = "https://api.buildzone.lol";
 
   const state = {
     initData: "",
@@ -30,7 +29,10 @@
     playersInit: false,
     atBottom: true,
     pendingNew: 0,
-    pmNick: null
+    pmNick: null,
+    lastOnline: 0,
+    waiting: false,
+    power: null
   };
 
   const shownIds = new Set();
@@ -103,6 +105,11 @@
     return String(s == null ? "" : s).replace(/§./g, "");
   }
 
+  function num(v, digits) {
+    if (v == null || isNaN(Number(v))) return null;
+    return Number(v).toLocaleString("ru-RU", { maximumFractionDigits: digits == null ? 1 : digits });
+  }
+
   function fmtTime(ts) {
     try {
       return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { hour12: false, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -127,6 +134,32 @@
     if (d > 0) return `${d}д ${h}ч`;
     if (h > 0) return `${h}ч ${m}м`;
     return `${m}м`;
+  }
+
+  function fmtUptimeFull(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return `${d} д ${h} ч ${m} м`;
+    if (h > 0) return `${h} ч ${m} м`;
+    return `${m} м`;
+  }
+
+  function fmtBytes(b) {
+    if (b == null || isNaN(Number(b))) return "неизвестно";
+    b = Number(b);
+    if (b >= 1073741824) return `${(b / 1073741824).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} ГБ`;
+    if (b >= 1048576) return `${Math.round(b / 1048576)} МБ`;
+    if (b >= 1024) return `${Math.round(b / 1024)} КБ`;
+    return `${b} Б`;
+  }
+
+  function barColor(pct) {
+    if (pct == null) return "";
+    if (pct >= 90) return "bad";
+    if (pct >= 70) return "warn";
+    return "";
   }
 
   /* ---------- preloader / net / offline ---------- */
@@ -231,7 +264,7 @@
       }
       const pill = $("rolePill");
       pill.hidden = false;
-      pill.textContent = role === "owner" ? "owner" : "moder";
+      pill.textContent = role === "owner" ? "Владелец" : "Модератор";
       pill.classList.toggle("owner", role === "owner");
       if (role !== "owner") {
         ["audit", "auditNav", "auditTab"].forEach((id) => {
@@ -239,6 +272,11 @@
           if (el) el.style.display = "none";
         });
       }
+      // power section visibility is decided by plugin answer in loadPower
+      ["power", "powerNav", "powerTab"].forEach((id) => {
+        const el = $(id);
+        if (el) el.style.display = "none";
+      });
       if (mock) {
         const mb = $("mockBadge");
         if (mb) mb.hidden = false;
@@ -283,34 +321,41 @@
       if (e.status === 404 || e.status === 405) {
         msg = "Backend API missing (http " + e.status + ") - deploy backend, then retry.";
       }
+      if (e instanceof TypeError) {
+        msg = "Backend unreachable - check API_BASE and hosting.";
+      }
       const dbg = "build " + BUILD +
+        "\napi: " + (API_BASE || "(same origin)") +
         "\ninitData: " + (state.initData ? state.initData.length + " chars" : "MISSING") +
         "\n" + (e.debug || msg);
       showDenied(msg, uid, dbg);
     }
   }
 
-  /* ---------- online ---------- */
+  /* ---------- players ---------- */
 
   async function loadStatus() {
     try {
       const r = await api("/api/status");
       const s = r.status || {};
+      state.lastOnline = Number(s.online || 0);
       $("sbOnline").textContent = `${s.online ?? "-"} / ${s.max_players ?? "-"}`;
       $("sbVersion").textContent = s.version || "-";
       $("sbTps").textContent = s.tps ?? "-";
       $("sbUptime").textContent = fmtUptime(s.uptime_sec);
       $("sbWorld").textContent = s.world || "-";
+      return true;
     } catch (e) {
       if (!noteOffline(e)) {
         $("sbOnline").textContent = "err";
       }
+      return false;
     }
   }
 
   const ACTIONS = [
-    { id: "kick", label: "Кик", needReason: true },
-    { id: "ban", label: "Бан", needReason: true },
+    { id: "kick", label: "Кикнуть", needReason: true },
+    { id: "ban", label: "Забанить", needReason: true },
     { id: "alban", label: "Alban", needReason: true },
     { id: "absoluter", label: "Absoluter", needReason: false }
   ];
@@ -365,7 +410,6 @@
     tr._print = playerPrint(p);
   }
 
-  // keyed update: only changed rows repaint, no full rebuild, no flicker
   function updatePlayersTable() {
     const tBody = $("playersBody");
     if (!state.playersInit) {
@@ -507,7 +551,7 @@
     state.chatInflight = true;
     try {
       const r = await api(`/api/game/chat?since=${state.chatLastId}&limit=100`);
-      if (r.search) return; // search answers never touch the feed cursor
+      if (r.search) return;
       const msgs = r.messages || [];
       if (!state.chatInit) {
         state.chatInit = true;
@@ -578,7 +622,7 @@
       return (stripCodes(b.name) + " " + (b.reason || "")).toLowerCase().includes(q);
     });
     if (!list.length) {
-      box.innerHTML = '<div class="td-muted">Баны не найдены.</div>';
+      box.innerHTML = '<div class="td-muted">Блокировки не найдены.</div>';
       return;
     }
     box.innerHTML = "";
@@ -624,7 +668,7 @@
       list.forEach((p) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `<td><b>${escapeHtml(p.name)}</b></td><td class="td-muted">${escapeHtml(p.version || "-")}</td>` +
-          `<td>${p.enabled ? '<span class="pill online">on</span>' : '<span class="pill offline">off</span>'}</td>`;
+          `<td>${p.enabled ? '<span class="pill online">вкл</span>' : '<span class="pill offline">выкл</span>'}</td>`;
         tBody.appendChild(tr);
       });
     } catch (e) {
@@ -646,9 +690,11 @@
       }
       box.innerHTML = "";
       list.forEach((a) => {
+        const denied = /denied/i.test(a.action || "") || a.ok === 0 || a.ok === false;
         const d = document.createElement("div");
+        if (denied) d.className = "denied";
         d.innerHTML = `<b>${escapeHtml(a.action)}</b> - ${colorize(a.target || "")} - ${escapeHtml(a.details || "")}` +
-          `<div class="log-meta">${escapeHtml(fmtTime(a.ts))} - by ${escapeHtml(a.admin || "?")}</div>`;
+          `<div class="log-meta">${escapeHtml(fmtTime(a.ts))} - ${escapeHtml(a.admin || "?")}</div>`;
         box.appendChild(d);
       });
     } catch (e) {
@@ -656,6 +702,241 @@
         box.innerHTML = '<div class="td-muted">Ошибка: ' + escapeHtml(e.message) + "</div>";
       }
     }
+  }
+
+  /* ---------- metrics ---------- */
+
+  function setTile(vId, barId, sId, valueText, pct, subText) {
+    const v = $(vId);
+    const bar = $(barId);
+    const s = $(sId);
+    if (v) v.textContent = valueText;
+    if (bar) {
+      bar.style.width = (pct == null ? 0 : Math.max(0, Math.min(100, pct))) + "%";
+      bar.className = barColor(pct);
+    }
+    if (s) s.textContent = subText;
+  }
+
+  function drawChart(history) {
+    const svg = $("mChart");
+    if (!svg) return;
+    const W = 600;
+    const H = 180;
+    const ns = "http://www.w3.org/2000/svg";
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    const grid = (y) => {
+      const l = document.createElementNS(ns, "line");
+      l.setAttribute("x1", "0");
+      l.setAttribute("x2", String(W));
+      l.setAttribute("y1", String(y));
+      l.setAttribute("y2", String(y));
+      l.setAttribute("stroke", "rgba(253,171,114,0.15)");
+      l.setAttribute("stroke-width", "1");
+      svg.appendChild(l);
+    };
+    [10, 60, 110, 160].forEach(grid);
+    if (!history || history.length < 2) return;
+    const series = [
+      { key: "cpu", color: "#fdab72", norm: (x) => x },
+      { key: "mem", color: "#55b8ff", norm: (x) => x },
+      { key: "tps", color: "#4ade80", norm: (x) => (x / 20) * 100 }
+    ];
+    series.forEach((sr) => {
+      const pts = history.map((h, i) => {
+        const x = (i / (history.length - 1)) * W;
+        const val = Math.max(0, Math.min(100, Number(h[sr.key]) || 0));
+        const y = 165 - (val / 100) * 150;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+      const pl = document.createElementNS(ns, "polyline");
+      pl.setAttribute("points", pts);
+      pl.setAttribute("fill", "none");
+      pl.setAttribute("stroke", sr.color);
+      pl.setAttribute("stroke-width", "2");
+      pl.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(pl);
+    });
+  }
+
+  async function loadMetrics() {
+    try {
+      const r = await api("/api/game/metrics");
+      const m = r.metrics || {};
+      const cpu = m.cpu || {};
+      const mem = m.memory || {};
+      const disk = m.disk || {};
+      const game = m.game || {};
+
+      const cpuP = num(cpu.system_percent);
+      setTile("mCpuV", "mCpuBar", "mCpuS",
+        cpuP == null ? "…" : cpuP + " %",
+        cpu.system_percent,
+        cpu.process_percent == null ? "замер..." : `процесс ${num(cpu.process_percent)} % - ядер ${cpu.cores ?? "-"}`);
+
+      const memP = num(mem.percent);
+      setTile("mMemV", "mMemBar", "mMemS",
+        memP == null ? "…" : memP + " %",
+        mem.percent,
+        mem.limit == null ? "лимит неизвестен" : `${fmtBytes(mem.used)} / ${fmtBytes(mem.limit)}`);
+
+      const diskP = num(disk.percent);
+      setTile("mDiskV", "mDiskBar", "mDiskS",
+        diskP == null ? "…" : diskP + " %",
+        disk.percent,
+        disk.total == null ? "неизвестно" : `${fmtBytes(disk.used)} / ${fmtBytes(disk.total)}`);
+
+      const tps = game.tps == null ? null : Number(game.tps);
+      const tpsBar = $("mTpsBar");
+      $("mTpsV").textContent = tps == null ? "…" : num(tps);
+      if (tpsBar) {
+        tpsBar.style.width = (tps == null ? 0 : Math.max(0, Math.min(100, (tps / 20) * 100))) + "%";
+        tpsBar.className = tps == null ? "" : tps < 15 ? "bad" : tps < 18 ? "warn" : "";
+      }
+      $("mTpsS").textContent = game.mspt == null ? "-" : `${num(game.mspt)} мс на тик`;
+
+      $("mLoad").textContent = cpu.loadavg ? cpu.loadavg.join(" / ") : "-";
+      $("mRss").textContent = fmtBytes(mem.process_rss);
+      $("mUptime").textContent = "время работы: " + fmtUptimeFull(m.uptime_sec);
+      drawChart(m.history);
+    } catch (e) {
+      noteOffline(e);
+    }
+  }
+
+  /* ---------- power ---------- */
+
+  let pendingPower = null;
+  let waitTimer = null;
+  let waitTries = 0;
+
+  function renderPower(p) {
+    state.power = p;
+    const ids = ["power", "powerNav", "powerTab"];
+    const showSection = !!p && (p.you_allowed || p.power_enabled);
+    ids.forEach((id) => {
+      const el = $(id);
+      if (el) el.style.display = showSection ? "" : "none";
+    });
+    if (!showSection || !p) return;
+
+    $("powerLocked").hidden = !p.locked_by_owner;
+    const deny = $("powerDeny");
+    if (!p.you_allowed && p.power_enabled) {
+      deny.hidden = false;
+      deny.textContent = p.deny_reason || "Нет прав на управление питанием.";
+    } else {
+      deny.hidden = true;
+    }
+    const ctl = $("powerControls");
+    ctl.hidden = !p.you_allowed;
+    if (p.you_allowed) {
+      const locked = !!p.locked_by_owner || state.waiting;
+      $("btnRestart").disabled = locked || !p.can_restart;
+      $("btnStop").disabled = locked || !p.can_stop;
+      const who = [];
+      if (p.you) who.push("вы: " + p.you);
+      if (p.allowed_admins && p.allowed_admins.length) who.push("допущены: " + p.allowed_admins.join(", "));
+      $("powerState").textContent = who.join(" - ");
+    }
+    const start = $("powerStart");
+    start.hidden = !p.you_allowed;
+    if (p.you_allowed) {
+      $("powerStartHint").textContent = p.start_hint || "";
+      $("powerHostLink").href = p.host_panel_url || "#";
+    }
+  }
+
+  async function loadPower() {
+    try {
+      const r = await api("/api/game/power");
+      renderPower(r.power || null);
+    } catch (e) {
+      if (!noteOffline(e)) {
+        ["power", "powerNav", "powerTab"].forEach((id) => {
+          const el = $(id);
+          if (el) el.style.display = "none";
+        });
+      }
+    }
+  }
+
+  function askPower(action) {
+    const p = state.power;
+    if (!p || state.waiting) return;
+    if (action === "restart" && !p.can_restart) return;
+    if (action === "stop" && !p.can_stop) return;
+    pendingPower = action;
+    const n = state.lastOnline;
+    $("pwTitle").textContent = action === "restart" ? "Перезапустить сервер?" : "Остановить сервер?";
+    $("pwText").textContent = action === "restart"
+      ? `Перезапустить сервер? Все игроки (${n} онлайн) будут отключены.`
+      : `Остановить сервер? Все игроки (${n} онлайн) будут отключены.`;
+    $("btnPowerYes").textContent = action === "restart" ? "Да, перезапустить" : "Да, остановить";
+    $("powerModal").hidden = false;
+    haptic("tap");
+  }
+
+  async function doPower() {
+    if (!pendingPower) return;
+    const action = pendingPower;
+    pendingPower = null;
+    $("powerModal").hidden = true;
+    try {
+      const r = await api("/api/game/power", { method: "POST", body: JSON.stringify({ action }) });
+      haptic("ok");
+      if (tg && tg.showAlert) tg.showAlert(r.result || "Готово");
+      startWaiting(action);
+      if (state.role === "owner") await loadAudit();
+    } catch (e) {
+      haptic("err");
+      if (!noteOffline(e)) {
+        if (tg && tg.showAlert) tg.showAlert("Ошибка: " + e.message);
+        else alert("Ошибка: " + e.message);
+      }
+    }
+  }
+
+  function startWaiting(action) {
+    state.waiting = true;
+    const box = $("powerCountdown");
+    box.hidden = false;
+    let left = 5;
+    const render = () => {
+      box.textContent = action === "restart"
+        ? `Перезапуск через ${left}... опросы приостановлены`
+        : `Остановка через ${left}... опросы приостановлены`;
+    };
+    render();
+    renderPower(state.power);
+    clearInterval(waitTimer);
+    waitTries = 0;
+    waitTimer = setInterval(async () => {
+      left--;
+      if (left > 0) {
+        render();
+        return;
+      }
+      box.textContent = "Ожидание сервера... проверяю раз в 10 секунд";
+      clearInterval(waitTimer);
+      waitTimer = setInterval(async () => {
+        waitTries++;
+        const ok = await loadStatus();
+        if (ok) {
+          clearInterval(waitTimer);
+          state.waiting = false;
+          box.textContent = "Сервер в сети - опросы возобновлены";
+          setTimeout(() => { box.hidden = true; }, 4000);
+          renderPower(state.power);
+          refreshAll();
+        } else if (waitTries >= 30) {
+          clearInterval(waitTimer);
+          state.waiting = false;
+          box.textContent = "Не дождались ответа - обнови вручную";
+          renderPower(state.power);
+        }
+      }, 10000);
+    }, 1000);
   }
 
   /* ---------- ban by nick with autocomplete ---------- */
@@ -675,7 +956,7 @@
       list.forEach((f) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.innerHTML = `<span class="s-dot${f.online ? " on" : ""}"></span><span>${colorize(f.name)}</span><small>${f.online ? "online" : "offline"}</small>`;
+        b.innerHTML = `<span class="s-dot${f.online ? " on" : ""}"></span><span>${colorize(f.name)}</span><small>${f.online ? "в сети" : "офлайн"}</small>`;
         b.onclick = () => {
           $("banNickInput").value = stripCodes(f.name);
           box.hidden = true;
@@ -749,10 +1030,10 @@
       ["ОС", p.os || "-"],
       ["Режим", p.gamemode || "-"],
       ["Пинг", p.ping ?? "-"],
-      ["XYZ", p.x != null ? `${p.x} ${p.y} ${p.z}` : "-"],
+      ["Координаты", p.x != null ? `${p.x} ${p.y} ${p.z}` : "-"],
       ["Мир", p.dimension || "-"],
-      ["HP", p.health ?? "-"],
-      ["OP", p.is_op ? "да" : "нет"],
+      ["Здоровье", p.health ?? "-"],
+      ["Оператор", p.is_op ? "да" : "нет"],
       ["XUID", p.xuid || "(пусто)"],
       ["device_id", p.device_id || "-"],
       ["IP", p.ip || "-"]
@@ -767,7 +1048,7 @@
     const pb = state.bans.filter((b) => pmNickMatch(b.name, name));
     $("pmBans").innerHTML = pb.length
       ? pb.map((b) => `<div><b>${escapeHtml(b.kind || "ban")}</b> - ${escapeHtml(b.reason || "")} <span class="log-meta">${escapeHtml(fmtTime(b.created))}</span></div>`).join("")
-      : '<div class="td-muted">Банов нет.</div>';
+      : '<div class="td-muted">Блокировок нет.</div>';
 
     if (p.x != null) {
       $("blX").value = p.x;
@@ -836,16 +1117,21 @@
     await loadBans();
     await loadPlugins();
     await loadAudit();
+    await loadMetrics();
+    await loadPower();
   }
 
   let pollStarted = false;
   function startPollers() {
     if (pollStarted) return;
     pollStarted = true;
-    setInterval(() => { if (!document.hidden && !state.demo) loadPlayers(); }, 5000);
-    setInterval(() => { if (!document.hidden && !state.demo) pollChat(); }, 2000);
-    setInterval(() => { if (!document.hidden && !state.demo) loadStatus(); }, 15000);
-    setInterval(() => { if (!document.hidden && !state.demo) loadBans(); }, 30000);
+    const go = () => !document.hidden && !state.demo && !state.waiting;
+    setInterval(() => { if (go()) loadPlayers(); }, 5000);
+    setInterval(() => { if (go()) pollChat(); }, 2000);
+    setInterval(() => { if (go()) loadStatus(); }, 15000);
+    setInterval(() => { if (go()) loadBans(); }, 30000);
+    setInterval(() => { if (go()) loadMetrics(); }, 5000);
+    setInterval(() => { if (go()) loadPower(); }, 30000);
   }
 
   /* ---------- chrome: progress, nav, reveal ---------- */
@@ -965,6 +1251,17 @@
       if (e.target.id === "confirmModal") {
         $("confirmModal").hidden = true;
         pendingAction = null;
+      }
+    });
+
+    $("btnRestart").onclick = () => askPower("restart");
+    $("btnStop").onclick = () => askPower("stop");
+    $("btnPowerYes").onclick = doPower;
+    $("btnPowerNo").onclick = () => { $("powerModal").hidden = true; pendingPower = null; };
+    $("powerModal").addEventListener("click", (e) => {
+      if (e.target.id === "powerModal") {
+        $("powerModal").hidden = true;
+        pendingPower = null;
       }
     });
 

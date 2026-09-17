@@ -30,6 +30,12 @@ function adminName(user) {
   return [user.first_name, user.last_name].filter(Boolean).join(" ") || ("id" + user.id);
 }
 
+// nick for plugin personal checks: plain username, no @ prefix
+function powerNick(user) {
+  if (user.username) return String(user.username).replace(/^@/, "");
+  return [user.first_name, user.last_name].filter(Boolean).join(" ") || ("id" + user.id);
+}
+
 // ---------- Telegram initData validation (WebCrypto) ----------
 
 async function hmacSha256Bytes(keyBytes, msg) {
@@ -139,6 +145,37 @@ function mockFind(q, limit) {
   const needle = String(q || "").toLowerCase();
   const list = needle ? known.filter((k) => k.clean_name.toLowerCase().includes(needle)) : known;
   return list.slice(0, limit);
+}
+let mockMetricsFirst = true;
+function mockMetricsData() {
+  const first = mockMetricsFirst;
+  mockMetricsFirst = false;
+  const now = Date.now() / 1000;
+  const history = [];
+  for (let i = 30; i >= 0; i--) {
+    history.push({
+      ts: Math.floor(now - i * 60),
+      cpu: Math.round((12 + Math.sin(i / 3) * 5 + (i % 5)) * 10) / 10,
+      mem: Math.round((34 + (i % 7)) * 10) / 10,
+      tps: Math.round((19.4 + (i % 3) * 0.2) * 10) / 10
+    });
+  }
+  return {
+    ts: now,
+    cpu: {
+      system_percent: first ? null : 12.4,
+      process_percent: first ? null : 45.0,
+      process_of_total: first ? null : 22.5,
+      cores: 2,
+      loadavg: [0.8, 0.6, 0.5]
+    },
+    memory: { limit: 2081390592, used: 718000000, percent: 34.5, process_rss: 88000000 },
+    disk: { total: 21474836480, used: 4311744512, free: 17163091968, percent: 20.1 },
+    game: { tps: 19.8, mspt: 2.4, tick_usage: 11.5 },
+    players: { online: mockPlayers.length, max: 44 },
+    uptime_sec: 159120,
+    history
+  };
 }
 const mockNotesMem = new Map();
 
@@ -403,6 +440,46 @@ export async function onRequest(context) {
     const r = await pluginCall(env, `/api/find?q=${encodeURIComponent(q)}&limit=${limit}`);
     if (r.error) return passError(r);
     return json({ ok: true, found: r.data });
+  }
+
+  // GET /api/game/metrics (plugin 1.1.0)
+  if (route === "game/metrics" && request.method === "GET") {
+    if (MOCK) return json({ ok: true, mock: true, metrics: mockMetricsData() });
+    const r = await pluginCall(env, "/api/metrics");
+    if (r.error) return passError(r);
+    return json({ ok: true, metrics: r.data });
+  }
+
+  // GET /api/game/power - rights are personal, nick from Telegram profile (plugin 1.2.0)
+  if (route === "game/power" && request.method === "GET") {
+    const nick = powerNick(v.user);
+    if (MOCK) {
+      return json({ ok: true, mock: true, power: {
+        can_stop: true, can_restart: true, can_start: false, power_enabled: true,
+        you: nick, you_allowed: true, deny_reason: "", locked_by_owner: false,
+        start_hint: "Запуск возможен только из панели хостинга: когда сервер выключен, плагин не работает и принять команду не может.",
+        host_panel_url: "https://panel.superhub.host/",
+        allowed_admins: [nick], owners: ["oxxygen"]
+      } });
+    }
+    const r = await pluginCall(env, "/api/power?admin=" + encodeURIComponent(nick));
+    if (r.error) return passError(r);
+    return json({ ok: true, power: r.data });
+  }
+
+  // POST /api/game/power {action} - plugin is the authority, any authed role may ask
+  if (route === "game/power" && request.method === "POST") {
+    const action = String(body.action || "");
+    if (action !== "restart" && action !== "stop") return json({ ok: false, error: "bad action" }, 400);
+    const nick = powerNick(v.user);
+    if (MOCK) {
+      return json({ ok: true, mock: true, result: action === "restart"
+        ? "сервер перезапустится через 5 сек. (если хостинг настроен на автоподъём)"
+        : "сервер остановится через 5 сек." });
+    }
+    const r = await pluginCall(env, "/api/power", { method: "POST", body: { admin: nick, action } });
+    if (r.error) return passError(r);
+    return json({ ok: true, result: r.data.result || "done" });
   }
 
   // GET /api/notes?name - admin notes (KV or memory)

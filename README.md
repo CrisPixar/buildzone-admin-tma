@@ -33,5 +33,10 @@ Admin console for Building Zone as Telegram Mini App. Warm design from building-
 - Functions in ./functions serve /api/* on same domain
 - Set env vars in Pages dashboard, then redeploy
 
+## Live backend (Render)
+- Frontend API_BASE points to https://api.buildzone.lol (Render Node backend, same routes as server.js)
+- Reason: Cloudflare Pages edge blocks direct calls to the plugin IP (1003), Node backend calls it fine
+- Render env: GAME_API_URL=http://89.188.109.183:26903 (direct IP), GAME_API_KEY, BOT_TOKEN, OWNER_IDS, MODERATOR_IDS
+
 ## Pages
-Online (poll 5s, keyed rows, kick/ban/alban/absoluter with confirm), Chat (poll 2s, dedup by id, send, one-tap filter, search), Bans (search, owner unban, ban-by-nick with /find autocomplete), Plugins (readonly), Audit (owner), Player card modal (summary, chat excerpt, blocklog, bans, notes).
+Online (poll 5s, keyed rows, kick/ban/alban/absoluter with confirm), Chat (poll 2s, dedup by id, send, one-tap filter, search), Bans (search, owner unban, ban-by-nick with /find autocomplete), Plugins (readonly), Audit (owner, DENIED entries red), Metrics (poll 5s, CPU/RAM/disk/TPS tiles + SVG history chart), Server power (poll 30s, rights from plugin by Telegram username, restart/stop with confirm modal + 5s countdown + waiting mode), Player card modal (summary, chat excerpt, blocklog, bans, notes).

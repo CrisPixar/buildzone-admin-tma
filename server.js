@@ -32,6 +32,10 @@ function adminName(user) {
   if (user.username) return "@" + user.username;
   return [user.first_name, user.last_name].filter(Boolean).join(" ") || ("id" + user.id);
 }
+function powerNick(user) {
+  if (user.username) return String(user.username).replace(/^@/, "");
+  return [user.first_name, user.last_name].filter(Boolean).join(" ") || ("id" + user.id);
+}
 
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
@@ -133,6 +137,31 @@ const mockChat = [
 ];
 const mockBans = [];
 const mockAudit = [];
+let mockMetricsFirst = true;
+function mockMetricsData() {
+  const first = mockMetricsFirst;
+  mockMetricsFirst = false;
+  const now = Date.now() / 1000;
+  const history = [];
+  for (let i = 30; i >= 0; i--) {
+    history.push({
+      ts: Math.floor(now - i * 60),
+      cpu: Math.round((12 + Math.sin(i / 3) * 5 + (i % 5)) * 10) / 10,
+      mem: Math.round((34 + (i % 7)) * 10) / 10,
+      tps: Math.round((19.4 + (i % 3) * 0.2) * 10) / 10
+    });
+  }
+  return {
+    ts: now,
+    cpu: { system_percent: first ? null : 12.4, process_percent: first ? null : 45.0, process_of_total: first ? null : 22.5, cores: 2, loadavg: [0.8, 0.6, 0.5] },
+    memory: { limit: 2081390592, used: 718000000, percent: 34.5, process_rss: 88000000 },
+    disk: { total: 21474836480, used: 4311744512, free: 17163091968, percent: 20.1 },
+    game: { tps: 19.8, mspt: 2.4, tick_usage: 11.5 },
+    players: { online: mockPlayers.length, max: 44 },
+    uptime_sec: 159120,
+    history
+  };
+}
 const mockNotes = new Map();
 
 function mockResult(action, admin, name, reason) {
@@ -298,6 +327,43 @@ app.get("/api/game/find", needAuth, async (req, res) => {
   const r = await pluginCall(`/api/find?q=${encodeURIComponent(q)}&limit=${limit}`);
   if (r.error) return passError(res, r);
   res.json({ ok: true, found: r.data });
+});
+
+app.get("/api/game/metrics", needAuth, async (req, res) => {
+  if (MOCK) return res.json({ ok: true, mock: true, metrics: mockMetricsData() });
+  const r = await pluginCall("/api/metrics");
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, metrics: r.data });
+});
+
+app.get("/api/game/power", needAuth, async (req, res) => {
+  const nick = powerNick(req.tgUser);
+  if (MOCK) {
+    return res.json({ ok: true, mock: true, power: {
+      can_stop: true, can_restart: true, can_start: false, power_enabled: true,
+      you: nick, you_allowed: true, deny_reason: "", locked_by_owner: false,
+      start_hint: "Запуск возможен только из панели хостинга: когда сервер выключен, плагин не работает и принять команду не может.",
+      host_panel_url: "https://panel.superhub.host/",
+      allowed_admins: [nick], owners: ["oxxygen"]
+    } });
+  }
+  const r = await pluginCall("/api/power?admin=" + encodeURIComponent(nick));
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, power: r.data });
+});
+
+app.post("/api/game/power", needAuth, async (req, res) => {
+  const action = String(req.body.action || "");
+  if (action !== "restart" && action !== "stop") return res.status(400).json({ ok: false, error: "bad action" });
+  const nick = powerNick(req.tgUser);
+  if (MOCK) {
+    return res.json({ ok: true, mock: true, result: action === "restart"
+      ? "сервер перезапустится через 5 сек. (если хостинг настроен на автоподъём)"
+      : "сервер остановится через 5 сек." });
+  }
+  const r = await pluginCall("/api/power", { method: "POST", body: { admin: nick, action } });
+  if (r.error) return passError(res, r);
+  res.json({ ok: true, result: r.data.result || "done" });
 });
 
 app.get("/api/notes", needAuth, (req, res) => {
