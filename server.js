@@ -8,6 +8,7 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const { startBot } = require("./bot");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,6 +41,24 @@ function powerNick(user) {
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// ---------- request stats for the bot (in-memory, resets on restart) ----------
+const STATS = { startedAt: Date.now(), total: 0, err4xx: 0, err5xx: 0, byRoute: new Map() };
+app.use((req, res, next) => {
+  if (!req.path || !req.path.startsWith("/api/")) return next();
+  const key = req.method + " " + req.path;
+  res.on("finish", () => {
+    STATS.total++;
+    STATS.byRoute.set(key, (STATS.byRoute.get(key) || 0) + 1);
+    if (res.statusCode >= 500) STATS.err5xx++;
+    else if (res.statusCode >= 400) STATS.err4xx++;
+  });
+  next();
+});
+function getStats() {
+  const top = [...STATS.byRoute.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  return { uptime_sec: Math.floor((Date.now() - STATS.startedAt) / 1000), total: STATS.total, err4xx: STATS.err4xx, err5xx: STATS.err5xx, by_route: top };
+}
 
 function parseInitData(initData) {
   const params = new URLSearchParams(initData || "");
@@ -407,9 +426,22 @@ if (SELF_URL) {
   console.log(`[ok] self-ping on: ${SELF_URL} every 20s`);
 }
 
+// Telegram bot: long polling inside this process. ENABLE_BOT=1 only in
+// production - a local run would steal updates from the live bot.
+if (/^(1|true|yes)$/i.test(String(process.env.ENABLE_BOT || ""))) {
+  try {
+    startBot(getStats);
+    console.log("[ok] telegram bot polling started");
+  } catch (e) {
+    console.log("[bot] failed to start:", e.message);
+  }
+} else {
+  console.log("[bot] polling off (set ENABLE_BOT=1 to run the Telegram bot)");
+}
+
 app.listen(PORT, () => {
   console.log(`[ok] BuildZone Admin TMA (node) on :${PORT}, mock=${MOCK}`);
   console.log(`[ok] owners=${OWNER_IDS.length} moderators=${MODERATOR_IDS.length}`);
 });
 
-module.exports = { app, validateInitData, parseInitData, roleOf };
+module.exports = { app, validateInitData, parseInitData, roleOf, getStats };
